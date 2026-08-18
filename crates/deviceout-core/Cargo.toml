@@ -1,0 +1,15 @@
+[package]
+name = "deviceout-core"
+description = "Clock drift control, resampling and ring buffer. No system APIs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rtrb = "0.4.0"
+rubato = { version = "5.0.0", default-features = false }
+
+[lints]
+workspace = true

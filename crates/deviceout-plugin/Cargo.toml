@@ -1,0 +1,27 @@
+[package]
+name = "deviceout-plugin"
+description = "DeviceOut: route DAW bus audio to a Windows output device."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+deviceout-core = { path = "../deviceout-core" }
+deviceout-engine = { path = "../deviceout-engine" }
+deviceout-sink = { path = "../deviceout-sink" }
+
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
+    "assert_process_allocs",
+] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+egui_extras = { version = "0.31", features = ["svg"] }
+open = "5"
+parking_lot = "0.12"
+
+[lints]
+workspace = true

@@ -1,0 +1,130 @@
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
+
+use nih_plug_egui::egui::{
+    self, Color32, CornerRadius, FontId, Margin, Stroke, TextStyle, Vec2, Visuals,
+};
+
+pub(crate) const BG: Color32 = Color32::from_rgb(10, 10, 12);
+pub(crate) const CARD: Color32 = Color32::from_rgb(16, 17, 20);
+pub(crate) const TRACK: Color32 = Color32::from_rgb(38, 39, 43);
+pub(crate) const WIDGET: Color32 = Color32::from_rgb(22, 24, 28);
+pub(crate) const WIDGET_HOVER: Color32 = Color32::from_rgb(28, 31, 37);
+pub(crate) const BORDER: Color32 = Color32::from_rgb(31, 33, 38);
+
+pub(crate) const TEXT: Color32 = Color32::from_rgb(244, 244, 245);
+pub(crate) const TEXT_DIM: Color32 = Color32::from_rgb(161, 161, 170);
+pub(crate) const TEXT_FAINT: Color32 = Color32::from_rgb(92, 96, 104);
+
+pub(crate) const GREEN: Color32 = Color32::from_rgb(52, 211, 153);
+pub(crate) const AMBER: Color32 = Color32::from_rgb(251, 191, 36);
+pub(crate) const ORANGE: Color32 = Color32::from_rgb(251, 146, 60);
+pub(crate) const RED: Color32 = Color32::from_rgb(248, 113, 113);
+
+pub(crate) const CORNER: CornerRadius = CornerRadius::same(10);
+pub(crate) const CORNER_SMALL: CornerRadius = CornerRadius::same(6);
+
+pub(crate) fn install(ctx: &egui::Context) {
+    install_cjk_font(ctx);
+    egui_extras::install_image_loaders(ctx);
+
+    let mut style = (*ctx.style()).clone();
+
+    style.text_styles = [
+        (TextStyle::Heading, FontId::proportional(16.0)),
+        (TextStyle::Body, FontId::proportional(13.5)),
+        (TextStyle::Button, FontId::proportional(13.0)),
+        (TextStyle::Small, FontId::proportional(11.0)),
+        (TextStyle::Monospace, FontId::monospace(13.0)),
+    ]
+        .into();
+
+    style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+    style.spacing.button_padding = Vec2::new(12.0, 7.0);
+    style.spacing.interact_size.y = 32.0;
+
+    let mut visuals = Visuals::dark();
+    visuals.panel_fill = BG;
+    visuals.window_fill = CARD;
+    visuals.extreme_bg_color = BG;
+    visuals.faint_bg_color = WIDGET;
+    visuals.window_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.window_corner_radius = CORNER;
+    visuals.override_text_color = Some(TEXT);
+    visuals.hyperlink_color = TEXT;
+    visuals.selection.bg_fill = Color32::from_rgb(63, 63, 70);
+    visuals.selection.stroke = Stroke::new(1.0_f32, TEXT_DIM);
+
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.widgets.noninteractive.corner_radius = CORNER_SMALL;
+    visuals.widgets.inactive.weak_bg_fill = WIDGET;
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.widgets.inactive.corner_radius = CORNER_SMALL;
+    visuals.widgets.hovered.weak_bg_fill = WIDGET_HOVER;
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.widgets.hovered.corner_radius = CORNER_SMALL;
+    visuals.widgets.active.weak_bg_fill = WIDGET_HOVER;
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.widgets.active.corner_radius = CORNER_SMALL;
+    visuals.widgets.open = visuals.widgets.hovered;
+
+    style.visuals = visuals;
+    ctx.set_style(style);
+}
+
+pub(crate) fn root_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(BG)
+        .inner_margin(Margin::symmetric(18, 16))
+}
+
+pub(crate) fn card_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(CARD)
+        .stroke(Stroke::new(1.0_f32, BORDER))
+        .corner_radius(CORNER)
+        .inner_margin(Margin::symmetric(14, 12))
+}
+
+fn install_cjk_font(ctx: &egui::Context) {
+    static FONT: OnceLock<Option<(String, Arc<egui::FontData>)>> = OnceLock::new();
+
+    let Some((name, data)) = FONT.get_or_init(load_system_cjk_font).clone() else {
+        return;
+    };
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(name.clone(), data);
+
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push(name.clone());
+    }
+
+    ctx.set_fonts(fonts);
+}
+
+fn load_system_cjk_font() -> Option<(String, Arc<egui::FontData>)> {
+    let root =
+        std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let fonts_dir = root.join("Fonts");
+
+    const CANDIDATES: &[(&str, u32)] = &[
+        ("msyh.ttc", 0),
+        ("msyh.ttf", 0),
+        ("deng.ttf", 0),
+        ("simhei.ttf", 0),
+        ("simsun.ttc", 0),
+    ];
+
+    for (file, index) in CANDIDATES {
+        let Ok(bytes) = std::fs::read(fonts_dir.join(file)) else {
+            continue;
+        };
+
+        let mut data = egui::FontData::from_owned(bytes);
+        data.index = *index;
+        return Some(((*file).to_string(), Arc::new(data)));
+    }
+
+    None
+}
