@@ -214,6 +214,7 @@ pub fn install(args: &[String]) -> Result<()> {
     }
     copy_dir_all(&source, &target).map_err(|e| explain_permission(e, scope))?;
     write_marker(&target, scope, &source)?;
+    install_updater()?;
 
     println!("  已装到 {}", target.display());
     warn_about_duplicate(scope);
@@ -221,6 +222,25 @@ pub fn install(args: &[String]) -> Result<()> {
     println!();
     println!("重启 DAW -> 总线挂 DeviceOut -> 选输出设备 -> 语音软件麦克风选对应 CABLE Output");
 
+    Ok(())
+}
+
+fn install_updater() -> Result<()> {
+    let src = PathBuf::from("target")
+        .join("release")
+        .join("deviceout-updater.exe");
+    if !src.is_file() {
+        return Ok(());
+    }
+    let dest_dir = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .context("LOCALAPPDATA")?
+        .join("DeviceOut");
+    fs::create_dir_all(&dest_dir)?;
+    let dest = dest_dir.join("deviceout-updater.exe");
+    fs::copy(&src, &dest)
+        .with_context(|| format!("复制 updater -> {}", dest.display()))?;
+    println!("  updater {}", dest.display());
     Ok(())
 }
 

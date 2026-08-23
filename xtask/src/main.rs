@@ -1,5 +1,6 @@
 mod install;
 mod package;
+mod publish;
 
 fn main() -> nih_plug_xtask::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,8 +31,9 @@ fn print_usage() {
   install --source <包路径>  指定 .vst3 包
 
 发布
-  package                    构建并编出 setup.exe
-  package --no-build         用现有 target/bundled 产物
+  package                    构建并编出 setup.exe + latest.json/.sig
+  package --no-build         用现有产物
+  package --upload           按序 PUT 到 Nexus raw-releases
 
 卸载
   uninstall                  用户级

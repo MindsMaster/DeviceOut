@@ -5,11 +5,13 @@ members = [
     "crates/deviceout-sink",
     "crates/deviceout-engine",
     "crates/deviceout-plugin",
+    "crates/deviceout-update",
+    "crates/deviceout-updater",
     "xtask",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 authors = ["DeviceOut"]

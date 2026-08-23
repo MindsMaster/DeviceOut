@@ -1,0 +1,32 @@
+[package]
+name = "deviceout-updater"
+description = "DeviceOut updater: feed check, install, outbox send"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "deviceout-updater"
+path = "src/main.rs"
+
+[dependencies]
+deviceout-update = { path = "../deviceout-update" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3.4.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[lints]
+workspace = true

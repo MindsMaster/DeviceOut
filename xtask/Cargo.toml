@@ -10,3 +10,6 @@ repository.workspace = true
 [dependencies]
 nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 anyhow = "1"
+deviceout-update = { path = "../crates/deviceout-update" }
+serde_json = "1"
+ureq = "3.4.0"

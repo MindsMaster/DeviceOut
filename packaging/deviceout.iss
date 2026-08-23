@@ -20,25 +20,23 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
-DefaultDirName={autocf}\VST3\{#MyBundleName}
+DefaultDirName={localappdata}\Programs\Common\VST3\{#MyBundleName}
 
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 
-UninstallFilesDir={autoappdata}\DeviceOut\uninstall
+UninstallFilesDir={localappdata}\DeviceOut\uninstall
 
 DisableFinishedPage=no
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
 
-CloseApplications=yes
-CloseApplicationsFilter=*.vst3
+CloseApplications=no
 RestartApplications=no
 
 SetupMutex={#MyAppName}Setup
 
 OutputDir=out
-OutputBaseFilename={#MyAppName}-{#MyAppVersion}-setup
+OutputBaseFilename={#MyAppName}-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -50,6 +48,10 @@ Name: "chinese"; MessagesFile: "compiler:Default.isl"
 Source: "..\target\bundled\{#MyBundleName}\*"; \
     DestDir: "{app}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\target\release\deviceout-updater.exe"; \
+    DestDir: "{localappdata}\DeviceOut"; \
+    DestName: "deviceout-updater.exe"; \
+    Flags: ignoreversion
 
 [Dirs]
 Name: "{app}"; Flags: uninsalwaysuninstall
@@ -58,7 +60,7 @@ Name: "{app}\Contents\x86_64-win"; Flags: uninsalwaysuninstall
 Name: "{app}\Contents\Resources"; Flags: uninsalwaysuninstall
 
 [UninstallDelete]
-Type: dirifempty; Name: "{autoappdata}\DeviceOut"
+Type: dirifempty; Name: "{localappdata}\DeviceOut"
 
 [Code]
 const

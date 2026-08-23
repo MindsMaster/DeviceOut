@@ -8,4 +8,5 @@
 /.commitmsg
 
 /packaging/out
+/packaging/keys
 /.build
