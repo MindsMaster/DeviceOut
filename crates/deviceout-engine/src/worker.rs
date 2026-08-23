@@ -340,6 +340,7 @@ impl Worker {
         self.sink.prefill_silence()?;
         self.sink.start()?;
         metrics.set_running();
+        metrics.set_sink_latency(self.sink.stream_latency_ms().unwrap_or(0.0));
 
         let mut period = 0usize;
         while !stop.load(Ordering::Relaxed) {

@@ -67,6 +67,7 @@ pub struct EngineMetrics {
     ratio: AtomicU64,
     clamp_events: AtomicU64,
     sink_rate_hz: AtomicU64,
+    sink_latency_ms: AtomicU64,
     period_frames: AtomicU64,
     channels: AtomicU64,
     running_seconds: AtomicU64,
@@ -90,6 +91,7 @@ impl EngineMetrics {
             ratio: AtomicU64::new(1.0f64.to_bits()),
             clamp_events: AtomicU64::new(0),
             sink_rate_hz: AtomicU64::new(0),
+            sink_latency_ms: AtomicU64::new(0),
             period_frames: AtomicU64::new(0),
             channels: AtomicU64::new(1),
             running_seconds: AtomicU64::new(0),
@@ -149,6 +151,10 @@ impl EngineMetrics {
     pub(crate) fn set_target(&self, target_frames: f64, settled_after_s: f64) {
         store_f64(&self.target_frames, target_frames);
         store_f64(&self.settled_after_s, settled_after_s);
+    }
+
+    pub(crate) fn set_sink_latency(&self, ms: f64) {
+        store_f64(&self.sink_latency_ms, ms.max(0.0));
     }
 
     pub(crate) fn publish(
@@ -240,6 +246,10 @@ impl EngineMetrics {
 
     pub fn sink_rate_hz(&self) -> f64 {
         load_f64(&self.sink_rate_hz)
+    }
+
+    pub fn sink_latency_ms(&self) -> f64 {
+        load_f64(&self.sink_latency_ms)
     }
 
     pub fn period_frames(&self) -> u64 {

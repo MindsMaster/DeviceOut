@@ -14,14 +14,29 @@ crate-type = ["cdylib", "rlib"]
 deviceout-core = { path = "../deviceout-core" }
 deviceout-engine = { path = "../deviceout-engine" }
 deviceout-sink = { path = "../deviceout-sink" }
+deviceout-update = { path = "../deviceout-update" }
 
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
     "assert_process_allocs",
 ] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
-egui_extras = { version = "0.31", features = ["svg"] }
+egui-baseview = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "ec70c3fe6b2f070dcacbc22924431edbe24bd1c0", features = ["windows_keyboard_workaround"] }
+egui_extras = { version = "0.31.1", features = ["svg"] }
 open = "5"
 parking_lot = "0.12"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winres = "0.1"
 
 [lints]
 workspace = true

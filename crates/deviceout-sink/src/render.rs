@@ -24,6 +24,7 @@ pub struct WasapiSink {
     format: StreamFormat,
     buffer_frames: u32,
     period_frames: usize,
+    stream_latency_ms: Option<f64>,
     running: bool,
 }
 
@@ -79,6 +80,8 @@ impl WasapiSink {
                 .GetService()
                 .map_err(|e| SinkError::init_from_hresult("获取渲染服务失败", e))?;
 
+            let stream_latency_ms = stream_latency_ms(&client);
+
             Ok(Self {
                 _com: com,
                 client,
@@ -87,6 +90,7 @@ impl WasapiSink {
                 format,
                 buffer_frames,
                 period_frames: period_frames.max(1),
+                stream_latency_ms,
                 running: false,
             })
         }
@@ -94,6 +98,10 @@ impl WasapiSink {
 
     pub fn buffer_frames(&self) -> u32 {
         self.buffer_frames
+    }
+
+    pub fn stream_latency_ms(&self) -> Option<f64> {
+        self.stream_latency_ms
     }
 
     pub fn prefill_silence(&mut self) -> Result<usize, SinkError> {
@@ -217,6 +225,15 @@ impl Drop for WasapiSink {
     }
 }
 
+fn stream_latency_ms(client: &IAudioClient) -> Option<f64> {
+    let hns = unsafe { client.GetStreamLatency() }.ok()?;
+    (hns > 0).then(|| hns_to_ms(hns))
+}
+
+fn hns_to_ms(hns: i64) -> f64 {
+    hns as f64 / 10_000.0
+}
+
 unsafe fn write_samples(dst: *mut u8, src: &[f32], fmt: SampleFormat) {
     match fmt {
         SampleFormat::F32 => {
@@ -236,5 +253,17 @@ unsafe fn write_samples(dst: *mut u8, src: &[f32], fmt: SampleFormat) {
                 unsafe { out.add(i).write(v) };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hns_converts_to_ms() {
+        assert_eq!(hns_to_ms(10_000), 1.0);
+        assert_eq!(hns_to_ms(132_000), 13.2);
+        assert_eq!(hns_to_ms(0), 0.0);
     }
 }

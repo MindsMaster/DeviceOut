@@ -5,16 +5,21 @@ use nih_plug_egui::egui::{
     self, Color32, CornerRadius, FontId, Margin, Stroke, TextStyle, Vec2, Visuals,
 };
 
-pub(crate) const BG: Color32 = Color32::from_rgb(10, 10, 12);
-pub(crate) const CARD: Color32 = Color32::from_rgb(16, 17, 20);
-pub(crate) const TRACK: Color32 = Color32::from_rgb(38, 39, 43);
-pub(crate) const WIDGET: Color32 = Color32::from_rgb(22, 24, 28);
-pub(crate) const WIDGET_HOVER: Color32 = Color32::from_rgb(28, 31, 37);
-pub(crate) const BORDER: Color32 = Color32::from_rgb(31, 33, 38);
+pub(crate) const BG: Color32 = Color32::from_rgb(9, 9, 11);
+pub(crate) const CARD: Color32 = Color32::from_rgb(16, 16, 20);
+pub(crate) const TRACK: Color32 = Color32::from_rgb(39, 39, 42);
+pub(crate) const WIDGET: Color32 = Color32::from_rgb(24, 24, 27);
+pub(crate) const WIDGET_HOVER: Color32 = Color32::from_rgb(39, 39, 42);
+pub(crate) const BORDER: Color32 = Color32::from_rgb(35, 35, 41);
+pub(crate) const OUTLINE: Color32 = Color32::from_rgb(39, 39, 42);
 
 pub(crate) const TEXT: Color32 = Color32::from_rgb(244, 244, 245);
 pub(crate) const TEXT_DIM: Color32 = Color32::from_rgb(161, 161, 170);
-pub(crate) const TEXT_FAINT: Color32 = Color32::from_rgb(92, 96, 104);
+pub(crate) const TEXT_FAINT: Color32 = Color32::from_rgb(113, 113, 122);
+
+pub(crate) const PRIMARY: Color32 = Color32::from_rgb(250, 250, 250);
+pub(crate) const PRIMARY_HOVER: Color32 = Color32::from_rgb(228, 228, 231);
+pub(crate) const PRIMARY_TEXT: Color32 = Color32::from_rgb(9, 9, 11);
 
 pub(crate) const GREEN: Color32 = Color32::from_rgb(52, 211, 153);
 pub(crate) const AMBER: Color32 = Color32::from_rgb(251, 191, 36);
@@ -23,6 +28,7 @@ pub(crate) const RED: Color32 = Color32::from_rgb(248, 113, 113);
 
 pub(crate) const CORNER: CornerRadius = CornerRadius::same(10);
 pub(crate) const CORNER_SMALL: CornerRadius = CornerRadius::same(6);
+pub(crate) const CORNER_BUTTON: CornerRadius = CornerRadius::same(8);
 
 pub(crate) fn install(ctx: &egui::Context) {
     install_cjk_font(ctx);
@@ -37,11 +43,23 @@ pub(crate) fn install(ctx: &egui::Context) {
         (TextStyle::Small, FontId::proportional(11.0)),
         (TextStyle::Monospace, FontId::monospace(13.0)),
     ]
-        .into();
+    .into();
 
     style.spacing.item_spacing = Vec2::new(8.0, 6.0);
     style.spacing.button_padding = Vec2::new(12.0, 7.0);
     style.spacing.interact_size.y = 32.0;
+
+    let mut scroll = egui::style::ScrollStyle::floating();
+    scroll.bar_width = 8.0;
+    scroll.floating_width = 6.0;
+    scroll.bar_inner_margin = 3.0;
+    scroll.handle_min_length = 32.0;
+    scroll.foreground_color = true;
+    scroll.active_handle_opacity = 0.45;
+    scroll.interact_handle_opacity = 0.8;
+    scroll.active_background_opacity = 0.0;
+    scroll.interact_background_opacity = 0.35;
+    style.spacing.scroll = scroll;
 
     let mut visuals = Visuals::dark();
     visuals.panel_fill = BG;

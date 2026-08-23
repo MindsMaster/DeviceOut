@@ -1,26 +1,37 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::sync::Once;
 
 use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use parking_lot::{Mutex, RwLock};
 
 use deviceout_core::{ring, RingProducer};
-use deviceout_engine::{ring_capacity_frames, start, EngineConfig, EngineHandle, EngineState};
+use deviceout_engine::{start, EngineConfig, EngineHandle, EngineState};
 use deviceout_sink::wasapi::{list_output_devices, ComGuard};
 use deviceout_sink::DeviceInfo;
 
 mod editor;
+pub mod i18n;
 
-const RING_MS: f64 = 400.0;
+pub(crate) const DEFAULT_RING_FRAMES: u32 = 16384;
+pub(crate) const RING_FRAME_STEPS: &[u32] = &[1024, 2048, 4096, 8192, 16384, 32768];
+
+pub(crate) fn clamp_ring_frames(frames: u32) -> u32 {
+    RING_FRAME_STEPS
+        .iter()
+        .copied()
+        .min_by_key(|step| step.abs_diff(frames.max(1)))
+        .unwrap_or(DEFAULT_RING_FRAMES)
+}
 
 const EDITOR_WIDTH: u32 = 440;
-const EDITOR_HEIGHT: u32 = 420;
+const EDITOR_HEIGHT: u32 = 560;
 
 pub struct DeviceOut {
     params: Arc<DeviceOutParams>,
 
-    producer: Option<RingProducer>,
+    producer: Arc<Mutex<Option<RingProducer>>>,
 
     scratch: Vec<f32>,
     slot: Arc<Mutex<EngineSlot>>,
@@ -32,7 +43,7 @@ impl std::fmt::Debug for DeviceOut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeviceOut")
             .field("device_id", &*self.params.device_id.read())
-            .field("initialized", &self.producer.is_some())
+            .field("initialized", &self.producer.lock().is_some())
             .field("scratch_samples", &self.scratch.len())
             .finish_non_exhaustive()
     }
@@ -52,6 +63,9 @@ struct DeviceOutParams {
 
     #[persist = "device-id"]
     device_id: Arc<RwLock<String>>,
+
+    #[persist = "ring-frames"]
+    ring_frames: Arc<RwLock<u32>>,
 }
 
 impl Default for DeviceOutParams {
@@ -59,6 +73,7 @@ impl Default for DeviceOutParams {
         Self {
             editor_state: EguiState::from_size(EDITOR_WIDTH, EDITOR_HEIGHT),
             device_id: Arc::new(RwLock::new(String::new())),
+            ring_frames: Arc::new(RwLock::new(DEFAULT_RING_FRAMES)),
         }
     }
 }
@@ -67,7 +82,7 @@ impl Default for DeviceOut {
     fn default() -> Self {
         Self {
             params: Arc::new(DeviceOutParams::default()),
-            producer: None,
+            producer: Arc::new(Mutex::new(None)),
             scratch: Vec::new(),
             slot: Arc::new(Mutex::new(EngineSlot::default())),
             metrics: Arc::new(RwLock::new(None)),
@@ -102,6 +117,30 @@ impl DeviceOut {
         slot.config = Some(config.clone());
         slot.handle = Some(start(consumer, config));
     }
+
+    pub(crate) fn apply_ring_frames(
+        producer: &Mutex<Option<RingProducer>>,
+        slot: &Mutex<EngineSlot>,
+        metrics: &RwLock<Option<Arc<deviceout_engine::EngineMetrics>>>,
+        frames: u32,
+    ) {
+        let capacity = clamp_ring_frames(frames).max(2) as usize;
+        let mut producer = producer.lock();
+        let mut slot = slot.lock();
+        if let Some(mut handle) = slot.handle.take() {
+            if let Some(consumer) = handle.stop() {
+                slot.consumer = Some(consumer);
+            }
+        }
+        let Some(config) = slot.config.clone() else {
+            return;
+        };
+        let (next_producer, next_consumer) = ring(capacity, config.channels);
+        *producer = Some(next_producer);
+        slot.consumer = Some(next_consumer);
+        Self::restart_locked(&mut slot, config.device_id);
+        *metrics.write() = slot.handle.as_ref().map(|h| Arc::clone(h.metrics()));
+    }
 }
 
 impl Plugin for DeviceOut {
@@ -128,6 +167,7 @@ impl Plugin for DeviceOut {
         editor::create(editor::Wiring {
             params: Arc::clone(&self.params),
             slot: Arc::clone(&self.slot),
+            producer: Arc::clone(&self.producer),
             metrics: Arc::clone(&self.metrics),
             devices: Arc::clone(&self.devices),
         })
@@ -139,6 +179,9 @@ impl Plugin for DeviceOut {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
+        kick_updater();
+        deviceout_update::telemetry::spawn_ping(env!("CARGO_PKG_VERSION"));
+
         let channels = audio_io_layout
             .main_output_channels
             .map_or(2, |c| c.get() as usize);
@@ -146,9 +189,10 @@ impl Plugin for DeviceOut {
 
         self.scratch = vec![0.0; buffer_config.max_buffer_size as usize * channels];
 
-        let capacity = ring_capacity_frames(source_rate, RING_MS);
-        let (producer, consumer) = ring(capacity, channels);
-        self.producer = Some(producer);
+        let frames = clamp_ring_frames(*self.params.ring_frames.read());
+        *self.params.ring_frames.write() = frames;
+        let (producer, consumer) = ring(frames.max(2) as usize, channels);
+        *self.producer.lock() = Some(producer);
 
         *self.devices.write() = enumerate_devices();
 
@@ -191,7 +235,10 @@ impl Plugin for DeviceOut {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        if let Some(producer) = self.producer.as_mut() {
+        let Some(mut guard) = self.producer.try_lock() else {
+            return ProcessStatus::Normal;
+        };
+        if let Some(producer) = guard.as_mut() {
             let mut n = 0;
             for channel_samples in buffer.iter_samples() {
                 for sample in channel_samples {
@@ -225,6 +272,27 @@ impl Vst3Plugin for DeviceOut {
 
 nih_export_vst3!(DeviceOut);
 
+fn kick_updater() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = deviceout_update::write_panic(info);
+            prev(info);
+        }));
+
+        if let Some(bundle) = deviceout_update::loaded_bundle_path() {
+            let s = bundle.to_string_lossy();
+            deviceout_update::spawn_updater(&[std::ffi::OsStr::new(s.as_ref())]);
+        } else {
+            deviceout_update::spawn_updater(&[]);
+        }
+        if !deviceout_update::list_json(&deviceout_update::outbox_dir()).is_empty() {
+            deviceout_update::spawn_updater(&[std::ffi::OsStr::new("--send-outbox")]);
+        }
+    });
+}
+
 pub(crate) struct UiState {
     pub state: EngineState,
     pub error: Option<String>,
@@ -239,6 +307,7 @@ pub(crate) struct UiState {
     pub sink_rate_hz: f64,
     pub period_frames: u64,
     pub latency_ms: f64,
+    pub driver_latency_ms: f64,
     pub reconnects: u64,
     pub frames_discarded: u64,
 }
