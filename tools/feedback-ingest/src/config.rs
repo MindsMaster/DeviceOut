@@ -1,6 +1,8 @@
+use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 pub struct Hit {
     pub at: Instant,
@@ -68,7 +70,9 @@ fn apply_env_file(path: &Path) {
             continue;
         }
         let mut val = v.trim().to_string();
-        if (val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\''))
+        if val.len() >= 2
+            && ((val.starts_with('"') && val.ends_with('"'))
+                || (val.starts_with('\'') && val.ends_with('\'')))
         {
             val = val[1..val.len() - 1].to_string();
         }
@@ -118,14 +122,42 @@ fn valid_admin_path(s: &str) -> bool {
 }
 
 fn random_path() -> String {
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let p = u128::from(std::process::id());
-    let mix = t
-        ^ (p << 48)
-        ^ t.rotate_left(17)
-        ^ (t.wrapping_mul(0x9e37_79b9_7f4a_7c15));
-    format!("{mix:032x}")
+    let mut out = String::with_capacity(32);
+    for _ in 0..2 {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(0);
+        out.push_str(&format!("{:016x}", hasher.finish()));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn random_path_is_valid_and_unpredictable() {
+        let a = random_path();
+        let b = random_path();
+        assert!(valid_admin_path(&a), "{a}");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn env_file_quotes_are_stripped_safely() {
+        let dir = std::env::temp_dir().join(format!("fb-env-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("env");
+        std::fs::write(
+            &file,
+            "# c\nexport FB_TEST_A=\"quoted value\"\nFB_TEST_B='x'\nFB_TEST_C=\"\nFB_TEST_D=plain\n",
+        )
+        .unwrap();
+        apply_env_file(&file);
+        assert_eq!(std::env::var("FB_TEST_A").unwrap(), "quoted value");
+        assert_eq!(std::env::var("FB_TEST_B").unwrap(), "x");
+        assert_eq!(std::env::var("FB_TEST_C").unwrap(), "\"");
+        assert_eq!(std::env::var("FB_TEST_D").unwrap(), "plain");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

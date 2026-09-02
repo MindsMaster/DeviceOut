@@ -57,16 +57,29 @@ fn admin_gate(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Option<Resp
             return Some(text(429, "rate"));
         }
     }
-    if !admin_authorized(req, password) {
-        let mut st = state.lock().unwrap();
-        prune(&mut st);
-        st.admin_fail_ip
-            .entry(ip)
-            .or_default()
-            .push(Hit { at: Instant::now() });
-        return Some(text(401, "auth").header("WWW-Authenticate", "Basic realm=\"DeviceOut\""));
+    match admin_auth(req, password) {
+        Auth::Ok => None,
+        Auth::Missing => Some(challenge()),
+        Auth::Wrong => {
+            let mut st = state.lock().unwrap();
+            prune(&mut st);
+            st.admin_fail_ip
+                .entry(ip)
+                .or_default()
+                .push(Hit { at: Instant::now() });
+            Some(challenge())
+        }
     }
-    None
+}
+
+fn challenge() -> Resp {
+    text(401, "auth").header("WWW-Authenticate", "Basic realm=\"DeviceOut\"")
+}
+
+enum Auth {
+    Ok,
+    Missing,
+    Wrong,
 }
 
 pub fn handle_admin_delete(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
@@ -99,12 +112,16 @@ pub fn handle_admin_delete(req: &Request, cfg: &Config, state: &Mutex<Limits>) -
     }
 }
 
-fn admin_authorized(req: &Request, password: &str) -> bool {
+fn admin_auth(req: &Request, password: &str) -> Auth {
     let Some(header) = header_value(req, "Authorization") else {
-        return false;
+        return Auth::Missing;
     };
     let expected = format!("Basic {}", b64(&format!("admin:{password}")));
-    ct_eq(&header, &expected)
+    if ct_eq(&header, &expected) {
+        Auth::Ok
+    } else {
+        Auth::Wrong
+    }
 }
 
 fn kind_label(kind: &str) -> &'static str {

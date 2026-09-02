@@ -162,23 +162,16 @@ pub fn esc(s: &str) -> String {
 
 pub fn client_ip(req: &Request) -> String {
     let peer = req.peer.ip().to_string();
-    if peer == "127.0.0.1" || peer == "::1" {
-        let xff = header_value(req, "X-Forwarded-For");
-        let real = header_value(req, "X-Real-IP");
-        return pick_client_ip(&peer, xff.as_deref(), real.as_deref());
+    if req.peer.ip().is_loopback() {
+        return pick_client_ip(&peer, req.header("X-Forwarded-For"));
     }
     peer
 }
 
-pub fn pick_client_ip(peer: &str, xff: Option<&str>, real_ip: Option<&str>) -> String {
-    if let Some(first) = xff.and_then(|v| v.split(',').next()).map(str::trim) {
-        if plausible_ip(first) {
-            return first.to_string();
-        }
-    }
-    if let Some(real) = real_ip.map(str::trim) {
-        if plausible_ip(real) {
-            return real.to_string();
+pub fn pick_client_ip(peer: &str, xff: Option<&str>) -> String {
+    if let Some(last) = xff.and_then(|v| v.rsplit(',').next()).map(str::trim) {
+        if plausible_ip(last) {
+            return last.to_string();
         }
     }
     peer.to_string()
@@ -301,38 +294,29 @@ mod tests {
     }
 
     #[test]
-    fn client_ip_prefers_first_xff_entry() {
+    fn client_ip_uses_the_hop_the_proxy_appended() {
         assert_eq!(
-            pick_client_ip("127.0.0.1", Some(" 203.0.113.7 , 10.0.0.1"), None),
+            pick_client_ip("127.0.0.1", Some("1.2.3.4, 203.0.113.7 ")),
             "203.0.113.7"
         );
         assert_eq!(
-            pick_client_ip("127.0.0.1", Some("2001:db8::1"), None),
+            pick_client_ip("127.0.0.1", Some("2001:db8::1")),
             "2001:db8::1"
         );
     }
 
     #[test]
-    fn client_ip_falls_back_in_order() {
+    fn client_ip_falls_back_to_peer() {
+        assert_eq!(pick_client_ip("127.0.0.1", None), "127.0.0.1");
+        assert_eq!(pick_client_ip("127.0.0.1", Some("")), "127.0.0.1");
+        assert_eq!(pick_client_ip("127.0.0.1", Some("not an ip!")), "127.0.0.1");
         assert_eq!(
-            pick_client_ip("127.0.0.1", None, Some("198.51.100.2")),
-            "198.51.100.2"
-        );
-        assert_eq!(
-            pick_client_ip("127.0.0.1", Some(""), Some("")),
+            pick_client_ip("127.0.0.1", Some(&"1".repeat(46))),
             "127.0.0.1"
         );
         assert_eq!(
-            pick_client_ip("127.0.0.1", Some("not an ip!"), Some("<script>")),
+            pick_client_ip("127.0.0.1", Some("8.8.8.8, junk junk")),
             "127.0.0.1"
-        );
-        assert_eq!(
-            pick_client_ip("127.0.0.1", Some(&"1".repeat(46)), None),
-            "127.0.0.1"
-        );
-        assert_eq!(
-            pick_client_ip("127.0.0.1", Some("junk junk"), Some(" 8.8.8.8 ")),
-            "8.8.8.8"
         );
     }
 
