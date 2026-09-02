@@ -80,10 +80,14 @@ pub struct RingProducer {
     channels: usize,
 }
 
+fn whole_frames(samples: usize, channels: usize) -> usize {
+    samples - samples % channels
+}
+
 impl RingProducer {
     pub fn push(&mut self, interleaved: &[f32]) -> PushOutcome {
         let mut written = 0;
-        let room = interleaved.len().min(self.inner.slots());
+        let room = whole_frames(interleaved.len().min(self.inner.slots()), self.channels);
         if let Ok(chunk) = self.inner.write_chunk_uninit(room) {
             written = chunk.fill_from_iter(interleaved.iter().copied());
         }
@@ -114,7 +118,7 @@ pub struct RingConsumer {
 impl RingConsumer {
     pub fn pull(&mut self, out: &mut [f32]) -> PullOutcome {
         let available = self.inner.slots();
-        let take = available.min(out.len());
+        let take = whole_frames(available.min(out.len()), self.channels);
 
         if take > 0 {
             if let Ok(chunk) = self.inner.read_chunk(take) {
@@ -299,6 +303,38 @@ mod tests {
             before_pulled,
             "丢弃被计入正常读出的帧数，吞吐统计会偏高"
         );
+    }
+
+    #[test]
+    fn partial_frames_never_enter_or_leave_the_ring() {
+        let (mut tx, mut rx) = ring(8, 2);
+        match tx.push(&[1.0, 2.0, 3.0]) {
+            PushOutcome::Overrun { dropped } => assert_eq!(dropped, 1),
+            other => panic!("尾部半帧应被丢弃并记账，实际: {other:?}"),
+        }
+        assert_eq!(rx.available_frames(), 1);
+        tx.push(&[4.0, 5.0]);
+
+        let mut out = [9.0f32; 3];
+        match rx.pull(&mut out) {
+            PullOutcome::Underrun { filled } => assert_eq!(filled, 1),
+            other => panic!("半帧输出应补零并记账，实际: {other:?}"),
+        }
+        assert_eq!(out, [1.0, 2.0, 0.0]);
+        let mut rest = [0.0f32; 2];
+        assert_eq!(rx.pull(&mut rest), PullOutcome::Ok);
+        assert_eq!(rest, [4.0, 5.0], "左右声道错位");
+    }
+
+    #[test]
+    fn a_nearly_full_ring_only_accepts_whole_frames() {
+        let (mut tx, rx) = ring(4, 2);
+        tx.push(&[1.0; 6]);
+        match tx.push(&[7.0, 8.0, 9.0, 10.0]) {
+            PushOutcome::Overrun { dropped } => assert_eq!(dropped, 2),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(rx.available_frames(), 4);
     }
 
     #[test]
