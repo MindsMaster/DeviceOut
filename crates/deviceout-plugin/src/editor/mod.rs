@@ -8,10 +8,10 @@ use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::{Mutex, RwLock};
 
 use deviceout_engine::{Fault, FaultKind};
+use deviceout_i18n::{fill, t};
 use deviceout_sink::DeviceInfo;
 use deviceout_update::outbox::FeedbackKind;
 
-use crate::i18n;
 use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, RING_FRAME_STEPS};
 
 mod theme;
@@ -229,7 +229,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             if widgets::icon_button(
                 ui,
                 egui::include_image!("../../assets/icons/tencentqq.svg"),
-                &format!("{} {QQ_GROUP}", i18n::pick("QQ群", "QQ group")),
+                &format!("{} {QQ_GROUP}", t().qq_group),
             )
             .clicked()
             {
@@ -245,17 +245,9 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
                 let _ = open::that_detached(format!("mailto:{AUTHOR_EMAIL}"));
             }
 
-            let label = match i18n::lang() {
-                i18n::Lang::Zh => "EN",
-                i18n::Lang::En => "中",
-            };
-            if widgets::lang_button(ui, label, i18n::pick("切换到 English", "切换到中文"))
-                .clicked()
-            {
-                i18n::set_lang(match i18n::lang() {
-                    i18n::Lang::Zh => i18n::Lang::En,
-                    i18n::Lang::En => i18n::Lang::Zh,
-                });
+            if let Some(pref) = widgets::language_menu(ui) {
+                deviceout_i18n::set_preference(pref);
+                theme::install_fonts(ui.ctx(), deviceout_i18n::current().script());
             }
         });
     });
@@ -288,9 +280,9 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
             .map(|d| d.name.clone())
             .unwrap_or_else(|| {
                 if current_id.is_empty() {
-                    i18n::pick("未选择设备", "No device selected").to_string()
+                    t().no_device.to_string()
                 } else {
-                    i18n::pick("已保存的设备不可用", "Saved device unavailable").to_string()
+                    t().saved_device_unavailable.to_string()
                 }
             });
 
@@ -305,11 +297,7 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
                 .show_ui(ui, |ui| {
                     for device in w.devices.read().iter() {
                         let label = if device.is_default {
-                            format!(
-                                "{} · {}",
-                                device.name,
-                                i18n::pick("系统默认", "System default")
-                            )
+                            format!("{} · {}", device.name, t().system_default)
                         } else {
                             device.name.clone()
                         };
@@ -343,45 +331,29 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
 }
 
 fn fault_text(fault: &Fault) -> String {
+    let t = t();
     let base = match fault.kind {
-        FaultKind::DeviceNotFound => i18n::pick(
-            "找不到所选输出设备，请重新选择或点击刷新",
-            "The selected output device was not found; pick another or refresh",
-        )
-        .to_string(),
-        FaultKind::DeviceLost => i18n::pick(
-            "输出设备已断开，正在等待它回来",
-            "The output device went away; waiting for it to return",
-        )
-        .to_string(),
-        FaultKind::ChannelMismatch { device, source } => match i18n::lang() {
-            i18n::Lang::Zh => format!("设备是 {device} 声道，宿主是 {source} 声道，请选一台立体声设备"),
-            i18n::Lang::En => {
-                format!("Device has {device} channels, the host has {source}; pick a stereo device")
-            }
-        },
-        FaultKind::UnsupportedFormat => i18n::pick(
-            "设备的混音格式无法输出",
-            "The device's mix format cannot be written",
-        )
-        .to_string(),
-        FaultKind::ComInit | FaultKind::Enumeration => i18n::pick(
-            "无法访问 Windows 音频系统",
-            "Could not reach the Windows audio system",
-        )
-        .to_string(),
-        FaultKind::StreamInit => i18n::pick("无法打开音频流", "Could not open the audio stream").to_string(),
-        FaultKind::Stream => i18n::pick("音频流出错", "The audio stream failed").to_string(),
-        FaultKind::Resample => i18n::pick("重采样出错", "Resampling failed").to_string(),
-        FaultKind::Config | FaultKind::Thread => {
-            i18n::pick("引擎无法启动", "The engine could not start").to_string()
-        }
+        FaultKind::DeviceNotFound => t.fault_device_not_found.to_string(),
+        FaultKind::DeviceLost => t.fault_device_lost.to_string(),
+        FaultKind::ChannelMismatch { device, source } => fill(
+            t.fault_channel_mismatch,
+            &[
+                ("device", &device.to_string()),
+                ("source", &source.to_string()),
+            ],
+        ),
+        FaultKind::UnsupportedFormat => t.fault_unsupported_format.to_string(),
+        FaultKind::ComInit | FaultKind::Enumeration => t.fault_audio_system.to_string(),
+        FaultKind::StreamInit => t.fault_stream_init.to_string(),
+        FaultKind::Stream => t.fault_stream.to_string(),
+        FaultKind::Resample => t.fault_resample.to_string(),
+        FaultKind::Config | FaultKind::Thread => t.fault_engine.to_string(),
     };
     if fault.attempt > 0 {
-        match i18n::lang() {
-            i18n::Lang::Zh => format!("{base}（第 {} 次重试）", fault.attempt),
-            i18n::Lang::En => format!("{base} (retry {})", fault.attempt),
-        }
+        fill(
+            t.fault_retry,
+            &[("message", &base), ("attempt", &fault.attempt.to_string())],
+        )
     } else {
         base
     }
@@ -495,17 +467,16 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
 fn alerts(ui: &mut egui::Ui, s: &UiState) {
     let mut lines: Vec<(egui::Color32, String)> = Vec::new();
 
+    let t = t();
     if s.underruns > 0 || s.overruns > 0 {
-        let text = match i18n::lang() {
-            i18n::Lang::Zh => format!(
-                "断流：欠载 {} 次，溢出 {} 次，静音 {:.2} s",
-                s.underruns, s.overruns, s.dropout_seconds
-            ),
-            i18n::Lang::En => format!(
-                "Dropouts: {} underruns, {} overruns, {:.2} s muted",
-                s.underruns, s.overruns, s.dropout_seconds
-            ),
-        };
+        let text = fill(
+            t.alert_dropouts,
+            &[
+                ("underruns", &s.underruns.to_string()),
+                ("overruns", &s.overruns.to_string()),
+                ("seconds", &format!("{:.2}", s.dropout_seconds)),
+            ],
+        );
         lines.push((theme::RED, text));
     }
 
@@ -515,27 +486,19 @@ fn alerts(ui: &mut egui::Ui, s: &UiState) {
         } else {
             0.0
         };
-        let text = match i18n::lang() {
-            i18n::Lang::Zh => format!(
-                "掉线 {} 次，已重连；丢弃 {} 帧（约 {:.2} s）",
-                s.reconnects, s.frames_discarded, discarded_s
-            ),
-            i18n::Lang::En => format!(
-                "{} reconnects; dropped {} frames (~{:.2} s)",
-                s.reconnects, s.frames_discarded, discarded_s
-            ),
-        };
+        let text = fill(
+            t.alert_reconnects,
+            &[
+                ("count", &s.reconnects.to_string()),
+                ("frames", &s.frames_discarded.to_string()),
+                ("seconds", &format!("{discarded_s:.2}")),
+            ],
+        );
         lines.push((theme::ORANGE, text));
     }
 
     if s.clamp_events > 0 {
-        let text = match i18n::lang() {
-            i18n::Lang::Zh => format!("重采样限幅 {} 次，检查两端采样率", s.clamp_events),
-            i18n::Lang::En => format!(
-                "Resampler clamped {} times; check both sample rates",
-                s.clamp_events
-            ),
-        };
+        let text = fill(t.alert_clamps, &[("count", &s.clamp_events.to_string())]);
         lines.push((theme::AMBER, text));
     }
 
@@ -560,7 +523,7 @@ fn idle_card(ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(16.0);
             ui.label(
-                egui::RichText::new(i18n::pick("链路未启动", "Engine idle"))
+                egui::RichText::new(t().engine_idle)
                     .size(13.0)
                     .color(theme::TEXT_DIM),
             );
@@ -650,7 +613,7 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if pending.is_some() {
                 ui.add_enabled_ui(state.install_started.is_none(), |ui| {
-                    if widgets::primary_button(ui, i18n::pick("安装", "Install")).clicked() {
+                    if widgets::primary_button(ui, t().install).clicked() {
                         state.install_started = Some(Instant::now());
                         state.update_view = None;
                         deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
@@ -659,23 +622,12 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
             }
             let checking = state.check_busy_since.is_some();
             ui.add_enabled_ui(!checking, |ui| {
-                if widgets::outline_button(
-                    ui,
-                    i18n::pick(
-                        if checking {
-                            "检查中…"
-                        } else {
-                            "检查更新"
-                        },
-                        if checking {
-                            "Checking…"
-                        } else {
-                            "Check for updates"
-                        },
-                    ),
-                )
-                .clicked()
-                {
+                let label = if checking {
+                    t().checking
+                } else {
+                    t().check_updates
+                };
+                if widgets::outline_button(ui, label).clicked() {
                     state.check_mark_attempt = st.last_attempt;
                     state.check_busy_since = Some(Instant::now());
                     state.update_view = None;
@@ -716,59 +668,38 @@ fn update_status_text(
     st: &deviceout_update::State,
     busy: bool,
 ) -> (String, egui::Color32, Option<String>) {
+    let t = t();
     if busy {
-        return (
-            i18n::pick("正在检查更新…", "Checking for updates…").into(),
-            theme::TEXT_DIM,
-            None,
-        );
+        return (t.checking_status.into(), theme::TEXT_DIM, None);
     }
     if let Some(pending) = pending {
-        let text = match i18n::lang() {
-            i18n::Lang::Zh => format!("v{} 已就绪", pending.version),
-            i18n::Lang::En => format!("Update v{} ready", pending.version),
-        };
         return (
-            text,
+            fill(t.update_ready, &[("version", &pending.version)]),
             theme::AMBER,
-            Some(
-                i18n::pick(
-                    "点击安装，随后按提示关闭宿主",
-                    "Click Install, then close the host when prompted",
-                )
-                .into(),
-            ),
+            Some(t.update_ready_tip.into()),
         );
     }
     if let Some(err) = st.last_install_error.as_deref() {
-        return (
-            i18n::pick("安装失败", "Install failed").into(),
-            theme::RED,
-            Some(error_tip(err)),
-        );
+        return (t.install_failed.into(), theme::RED, Some(error_tip(err)));
     }
     if let Some(err) = st.last_error.as_deref() {
-        return (
-            i18n::pick("检查失败", "Check failed").into(),
-            theme::RED,
-            Some(error_tip(err)),
-        );
+        return (t.check_failed.into(), theme::RED, Some(error_tip(err)));
     }
     if let Some(latest) = st.last_latest.as_deref() {
         match deviceout_update::cmp_latest(latest, current) {
             deviceout_update::Cmp::Newer => {
-                let text = match i18n::lang() {
-                    i18n::Lang::Zh => format!("发现新版本 v{latest}"),
-                    i18n::Lang::En => format!("Update v{latest} available"),
-                };
-                return (text, theme::AMBER, None);
+                return (
+                    fill(t.update_available, &[("version", latest)]),
+                    theme::AMBER,
+                    None,
+                );
             }
             deviceout_update::Cmp::EqualOrOlder => {
-                let text = match i18n::lang() {
-                    i18n::Lang::Zh => format!("已是最新 v{current}"),
-                    i18n::Lang::En => format!("Up to date v{current}"),
-                };
-                return (text, theme::TEXT_DIM, None);
+                return (
+                    fill(t.up_to_date, &[("version", current)]),
+                    theme::TEXT_DIM,
+                    None,
+                );
             }
             deviceout_update::Cmp::Invalid => {}
         }
@@ -795,18 +726,17 @@ fn feedback_row(
         ui.spacing_mut().item_spacing.x = 6.0;
         let waiting = state.prompt_wait.is_some();
         ui.add_enabled_ui(!waiting, |ui| {
-            if widgets::outline_button(ui, i18n::pick("问题反馈", "Report a bug")).clicked() {
+            if widgets::outline_button(ui, t().report_bug).clicked() {
                 open_feedback(state, FeedbackKind::Bug, bundle, snap, device_line);
             }
-            if widgets::outline_button(ui, i18n::pick("功能建议", "Feature request")).clicked()
-            {
+            if widgets::outline_button(ui, t().feature_request).clicked() {
                 open_feedback(state, FeedbackKind::Feature, bundle, snap, device_line);
             }
         });
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                egui::RichText::new(i18n::pick("匿名统计", "Usage stats"))
+                egui::RichText::new(t().usage_stats)
                     .size(10.5)
                     .color(theme::TEXT_FAINT),
             );
@@ -844,7 +774,7 @@ fn open_feedback(
         let Ok(thread) = thread else {
             state.send_note = Some((
                 Instant::now(),
-                i18n::pick("无法打开反馈窗口", "Could not open the feedback window").into(),
+                t().feedback_window_failed.into(),
                 theme::RED,
             ));
             return;
@@ -884,7 +814,7 @@ fn poll_prompt(state: &mut EditorUi) {
             state.send_watch = Some((id, Instant::now()));
             state.send_note = Some((
                 Instant::now(),
-                i18n::pick("发送中", "Sending").into(),
+                t().sending.into(),
                 theme::TEXT_DIM,
             ));
         }
@@ -905,7 +835,7 @@ fn poll_send(state: &mut EditorUi) {
         state.send_watch = None;
         state.send_note = Some((
             Instant::now(),
-            i18n::pick("已发送", "Sent").into(),
+            t().sent.into(),
             theme::GREEN,
         ));
         return;
@@ -914,7 +844,7 @@ fn poll_send(state: &mut EditorUi) {
         state.send_watch = None;
         state.send_note = Some((
             Instant::now(),
-            i18n::pick("发送失败", "Send failed").into(),
+            t().send_failed.into(),
             theme::RED,
         ));
         return;
@@ -923,7 +853,7 @@ fn poll_send(state: &mut EditorUi) {
         state.send_watch = None;
         state.send_note = Some((
             Instant::now(),
-            i18n::pick("已保存，稍后重试", "Saved, will retry").into(),
+            t().saved_will_retry.into(),
             theme::AMBER,
         ));
     }
@@ -976,11 +906,7 @@ fn queue_feedback(
 ) -> Result<String, String> {
     let pending = deviceout_update::list_json(&deviceout_update::outbox_dir()).len();
     if pending >= deviceout_update::OUTBOX_CAP {
-        return Err(i18n::pick(
-            "待发送反馈过多，请稍后再试",
-            "Too many queued feedback items; try again later",
-        )
-        .into());
+        return Err(t().feedback_queue_full.into());
     }
     let contact = Some(contact.trim().to_string()).filter(|c| !c.is_empty());
     let item = deviceout_update::new_outbox_item(
@@ -990,18 +916,9 @@ fn queue_feedback(
         diag,
         env!("CARGO_PKG_VERSION").to_string(),
     )
-    .map_err(|e| {
-        format!(
-            "{}{e}",
-            i18n::pick("无法写入反馈：", "Failed to save feedback: ")
-        )
-    })?;
-    deviceout_update::save_item(&deviceout_update::outbox_dir(), &item).map_err(|e| {
-        format!(
-            "{}{e}",
-            i18n::pick("无法写入反馈：", "Failed to save feedback: ")
-        )
-    })?;
+    .map_err(|e| format!("{}{e}", t().feedback_save_failed))?;
+    deviceout_update::save_item(&deviceout_update::outbox_dir(), &item)
+        .map_err(|e| format!("{}{e}", t().feedback_save_failed))?;
     Ok(item.id)
 }
 

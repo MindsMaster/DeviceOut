@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 deviceout-update = { path = "../deviceout-update" }
+deviceout-i18n = { path = "../deviceout-i18n" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

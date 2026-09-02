@@ -4,6 +4,7 @@ members = [
     "crates/deviceout-core",
     "crates/deviceout-sink",
     "crates/deviceout-engine",
+    "crates/deviceout-i18n",
     "crates/deviceout-plugin",
     "crates/deviceout-update",
     "crates/deviceout-updater",

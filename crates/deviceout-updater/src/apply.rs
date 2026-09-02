@@ -3,6 +3,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
+use deviceout_i18n::{fill, t};
 use deviceout_update::paths;
 
 use crate::{job, logutil};
@@ -43,10 +44,7 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
             cleanup_stale_updaters();
             logutil::log(&format!("apply: ok {}", manifest.version));
             alert(
-                &format!(
-                    "DeviceOut 已更新到 {}。\n\n请重新打开宿主以加载新版本。",
-                    manifest.version
-                ),
+                &fill(t().updater_updated, &[("version", &manifest.version)]),
                 false,
             );
             Ok(())
@@ -57,9 +55,7 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
             state.last_install_error = Some(format!("{e:#}"));
             let _ = deviceout_update::save_state(&state);
             alert(
-                &format!(
-                    "安装未完成。\n\n关闭占用插件的程序后，可在插件界面再次打开安装程序。\n\n{e:#}"
-                ),
+                &fill(t().updater_failed, &[("error", &format!("{e:#}"))]),
                 true,
             );
             Err(e)
@@ -111,9 +107,7 @@ fn wait_until_unlocked(bundle: &Path, version: &str) -> Result<bool> {
             return Ok(true);
         }
         let retry = alert(
-            &format!(
-                "DeviceOut {version} 已下载。\n\n请先关闭占用该插件的程序（Studio One、Reaper 等），然后点击「重试」。\n关闭程序不会关掉这个安装窗口。"
-            ),
+            &fill(t().updater_close_host, &[("version", version)]),
             true,
         );
         if !retry {
@@ -176,7 +170,7 @@ fn alert(text: &str, retry: bool) -> bool {
             .encode_wide()
             .chain(Some(0))
             .collect();
-        let title: Vec<u16> = std::ffi::OsStr::new("DeviceOut 更新")
+        let title: Vec<u16> = std::ffi::OsStr::new(t().updater_title)
             .encode_wide()
             .chain(Some(0))
             .collect();

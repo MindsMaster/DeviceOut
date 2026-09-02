@@ -15,6 +15,7 @@ deviceout-core = { path = "../deviceout-core" }
 deviceout-engine = { path = "../deviceout-engine" }
 deviceout-sink = { path = "../deviceout-sink" }
 deviceout-update = { path = "../deviceout-update" }
+deviceout-i18n = { path = "../deviceout-i18n" }
 
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
     "assert_process_allocs",

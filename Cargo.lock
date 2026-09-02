@@ -640,11 +640,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "deviceout-i18n"
+version = "1.0.0"
+dependencies = [
+ "deviceout-update",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "deviceout-plugin"
 version = "1.0.0"
 dependencies = [
  "deviceout-core",
  "deviceout-engine",
+ "deviceout-i18n",
  "deviceout-sink",
  "deviceout-update",
  "egui-baseview",
@@ -682,6 +691,7 @@ name = "deviceout-updater"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "deviceout-i18n",
  "deviceout-update",
  "serde",
  "serde_json",

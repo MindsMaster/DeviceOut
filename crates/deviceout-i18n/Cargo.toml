@@ -1,0 +1,20 @@
+[package]
+name = "deviceout-i18n"
+description = "UI strings and language selection shared by the plugin and the updater"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+deviceout-update = { path = "../deviceout-update" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+] }
+
+[lints]
+workspace = true

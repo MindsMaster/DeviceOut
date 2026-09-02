@@ -39,7 +39,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 const CLASS: &str = "DeviceOutFeedback";
-const FONT_FACE: &str = "Microsoft YaHei UI";
 
 const ID_OK: usize = 1;
 const ID_CANCEL: usize = 2;
@@ -119,18 +118,13 @@ struct Feedback {
 }
 
 pub fn run_feedback(kind_is_bug: bool, window: &PromptWindow) -> Option<(String, String)> {
-    let title = if kind_is_bug {
-        crate::i18n::pick("问题反馈", "Report a Bug")
+    let t = deviceout_i18n::t();
+    let (title, desc_label) = if kind_is_bug {
+        (t.prompt_bug_title, t.prompt_describe_bug)
     } else {
-        crate::i18n::pick("功能建议", "Feature Request")
+        (t.prompt_feature_title, t.prompt_describe_feature)
     };
-    let desc_label = if kind_is_bug {
-        crate::i18n::pick("描述遇到的问题", "Describe the problem")
-    } else {
-        crate::i18n::pick("描述想要的功能", "Describe the feature you want")
-    };
-    let contact_hint = crate::i18n::pick("邮箱 / QQ，可留空", "Email / QQ, optional");
-    unsafe { feedback_impl(title, desc_label, contact_hint, window) }
+    unsafe { feedback_impl(title, desc_label, t.prompt_contact_hint, window) }
 }
 
 fn dp(v: i32, dpi: u32) -> i32 {
@@ -502,7 +496,7 @@ unsafe fn build_controls(hwnd: HWND, feedback: &mut Feedback) {
         };
         let static_cls = wide("STATIC");
         let desc_lbl_w = feedback.desc_label.clone();
-        let contact_lbl_w = wide(crate::i18n::pick("联系方式", "Contact"));
+        let contact_lbl_w = wide(deviceout_i18n::t().prompt_contact);
         feedback.title_lbl = CreateWindowExW(
             0,
             static_cls.as_ptr(),
@@ -591,8 +585,8 @@ unsafe fn build_controls(hwnd: HWND, feedback: &mut Feedback) {
         );
 
         let btn_cls = wide("BUTTON");
-        let ok_l = wide(crate::i18n::pick("提交", "Submit"));
-        let cancel_l = wide(crate::i18n::pick("取消", "Cancel"));
+        let ok_l = wide(deviceout_i18n::t().prompt_submit);
+        let cancel_l = wide(deviceout_i18n::t().prompt_cancel);
         feedback.ok_btn = CreateWindowExW(
             0,
             btn_cls.as_ptr(),
@@ -872,8 +866,20 @@ unsafe fn make_font(dpi: u32, px: i32, weight: i32) -> HFONT {
             CLIP_DEFAULT_PRECIS as u32,
             CLEARTYPE_QUALITY as u32,
             DEFAULT_PITCH as u32 | FF_SWISS as u32,
-            wide(FONT_FACE).as_ptr(),
+            wide(font_face()).as_ptr(),
         )
+    }
+}
+
+fn font_face() -> &'static str {
+    use deviceout_i18n::Script;
+    match deviceout_i18n::current().script() {
+        Script::Hans => "Microsoft YaHei UI",
+        Script::Hant => "Microsoft JhengHei UI",
+        Script::Japanese => "Yu Gothic UI",
+        Script::Korean => "Malgun Gothic",
+        Script::Thai => "Leelawadee UI",
+        Script::Latin => "Segoe UI",
     }
 }
 

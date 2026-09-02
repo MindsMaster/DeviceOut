@@ -5,7 +5,6 @@ use nih_plug_egui::egui::{
 use deviceout_engine::EngineState;
 
 use super::theme;
-use crate::i18n;
 
 pub(crate) fn heading_text(ui: &mut egui::Ui, title: &str) {
     ui.label(
@@ -140,13 +139,14 @@ pub(crate) fn switch(ui: &mut egui::Ui, on: &mut bool) -> Response {
 }
 
 pub(crate) fn status_indicator(ui: &mut egui::Ui, state: Option<EngineState>) {
+    let t = deviceout_i18n::t();
     let (label, color) = match state {
-        Some(EngineState::Running) => (i18n::pick("运行中", "Running"), theme::GREEN),
-        Some(EngineState::Priming) => (i18n::pick("预填充", "Priming"), theme::AMBER),
-        Some(EngineState::Stopped) => (i18n::pick("已停止", "Stopped"), theme::TEXT_FAINT),
-        Some(EngineState::Failed) => (i18n::pick("出错", "Error"), theme::RED),
-        Some(EngineState::Reconnecting) => (i18n::pick("重连中", "Reconnecting"), theme::ORANGE),
-        None => (i18n::pick("未启动", "Idle"), theme::TEXT_FAINT),
+        Some(EngineState::Running) => (t.state_running, theme::GREEN),
+        Some(EngineState::Priming) => (t.state_priming, theme::AMBER),
+        Some(EngineState::Stopped) => (t.state_stopped, theme::TEXT_FAINT),
+        Some(EngineState::Failed) => (t.state_error, theme::RED),
+        Some(EngineState::Reconnecting) => (t.state_reconnecting, theme::ORANGE),
+        None => (t.state_idle, theme::TEXT_FAINT),
     };
 
     ui.horizontal(|ui| {
@@ -298,7 +298,7 @@ pub(crate) fn refresh_button(ui: &mut egui::Ui) -> Response {
     };
     refresh_icon(painter, rect.center(), 6.5, color);
 
-    response.on_hover_text(i18n::pick("刷新设备列表", "Refresh device list"))
+    response.on_hover_text(deviceout_i18n::t().refresh_devices)
 }
 
 fn refresh_icon(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
@@ -360,28 +360,45 @@ pub(crate) fn icon_button(
     response.on_hover_text(tooltip)
 }
 
-pub(crate) fn lang_button(ui: &mut egui::Ui, label: &str, tooltip: &str) -> Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+pub(crate) fn language_menu(ui: &mut egui::Ui) -> Option<deviceout_i18n::Preference> {
+    use deviceout_i18n::{Lang, Preference};
 
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, theme::CORNER_SMALL, theme::WIDGET_HOVER);
-    }
-
-    let color = if response.hovered() {
-        theme::TEXT
-    } else {
-        theme::TEXT_FAINT
-    };
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        FontId::proportional(11.0),
-        color,
-    );
-
-    response.on_hover_text(tooltip)
+    let t = deviceout_i18n::t();
+    let pref = deviceout_i18n::preference();
+    let current = deviceout_i18n::current();
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt("language")
+        .selected_text(
+            RichText::new(current.native_name())
+                .font(FontId::proportional(11.0))
+                .color(theme::TEXT_DIM),
+        )
+        .width(0.0)
+        .show_ui(ui, |ui| {
+            let system = format!(
+                "{} · {}",
+                t.follow_system,
+                deviceout_i18n::system_lang().native_name()
+            );
+            if ui
+                .selectable_label(pref == Preference::System, system)
+                .clicked()
+            {
+                chosen = Some(Preference::System);
+            }
+            ui.separator();
+            for lang in Lang::ALL {
+                if ui
+                    .selectable_label(pref == Preference::Fixed(lang), lang.native_name())
+                    .clicked()
+                {
+                    chosen = Some(Preference::Fixed(lang));
+                }
+            }
+        })
+        .response
+        .on_hover_text(t.language);
+    chosen
 }
 
 pub(crate) fn wordmark(ui: &mut egui::Ui) {

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use deviceout_i18n::Script;
 use nih_plug_egui::egui::{
     self, Color32, CornerRadius, FontId, Margin, Stroke, TextStyle, Vec2, Visuals,
 };
@@ -31,7 +33,7 @@ pub(crate) const CORNER_SMALL: CornerRadius = CornerRadius::same(6);
 pub(crate) const CORNER_BUTTON: CornerRadius = CornerRadius::same(8);
 
 pub(crate) fn install(ctx: &egui::Context) {
-    install_cjk_font(ctx);
+    install_fonts(ctx, deviceout_i18n::current().script());
     egui_extras::install_image_loaders(ctx);
 
     let mut style = (*ctx.style()).clone();
@@ -104,45 +106,60 @@ pub(crate) fn card_frame() -> egui::Frame {
         .inner_margin(Margin::symmetric(14, 12))
 }
 
-fn install_cjk_font(ctx: &egui::Context) {
-    static FONT: OnceLock<Option<(String, Arc<egui::FontData>)>> = OnceLock::new();
+type LoadedFont = Option<(String, Arc<egui::FontData>)>;
 
-    let Some((name, data)) = FONT.get_or_init(load_system_cjk_font).clone() else {
-        return;
-    };
-
+pub(crate) fn install_fonts(ctx: &egui::Context, script: Script) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(name.clone(), data);
-
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push(name.clone());
+    let mut names = Vec::new();
+    for candidates in [script_fonts(script), script_fonts(Script::Hans)] {
+        if let Some((name, data)) = cached_font(candidates) {
+            if !names.contains(&name) {
+                fonts.font_data.insert(name.clone(), data);
+                names.push(name);
+            }
+        }
     }
-
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .extend(names.iter().cloned());
+    }
     ctx.set_fonts(fonts);
 }
 
-fn load_system_cjk_font() -> Option<(String, Arc<egui::FontData>)> {
+fn script_fonts(script: Script) -> &'static [&'static str] {
+    match script {
+        Script::Hans => &["msyh.ttc", "msyh.ttf", "deng.ttf", "simhei.ttf", "simsun.ttc"],
+        Script::Hant => &["msjh.ttc", "msjh.ttf", "mingliu.ttc"],
+        Script::Japanese => &["YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"],
+        Script::Korean => &["malgun.ttf", "gulim.ttc"],
+        Script::Thai => &["LeelawUI.ttf", "leelawad.ttf", "tahoma.ttf"],
+        Script::Latin => &[],
+    }
+}
+
+fn cached_font(candidates: &'static [&'static str]) -> LoadedFont {
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, LoadedFont>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = candidates.first()?;
+    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
+    cache
+        .entry(key)
+        .or_insert_with(|| load_first_font(candidates))
+        .clone()
+}
+
+fn load_first_font(candidates: &[&str]) -> LoadedFont {
     let root =
         std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
     let fonts_dir = root.join("Fonts");
-
-    const CANDIDATES: &[(&str, u32)] = &[
-        ("msyh.ttc", 0),
-        ("msyh.ttf", 0),
-        ("deng.ttf", 0),
-        ("simhei.ttf", 0),
-        ("simsun.ttc", 0),
-    ];
-
-    for (file, index) in CANDIDATES {
+    for file in candidates {
         let Ok(bytes) = std::fs::read(fonts_dir.join(file)) else {
             continue;
         };
-
-        let mut data = egui::FontData::from_owned(bytes);
-        data.index = *index;
-        return Some(((*file).to_string(), Arc::new(data)));
+        return Some(((*file).to_string(), Arc::new(egui::FontData::from_owned(bytes))));
     }
-
     None
 }

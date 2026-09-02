@@ -12,7 +12,6 @@ use deviceout_sink::DeviceInfo;
 
 mod editor;
 mod engine_ctl;
-pub mod i18n;
 
 pub(crate) use engine_ctl::{
     min_ring_frames, EngineController, DEFAULT_RING_FRAMES, RING_FRAME_STEPS,
