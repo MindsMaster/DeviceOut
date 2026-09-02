@@ -2,6 +2,7 @@ mod admin;
 mod api;
 mod assets;
 mod config;
+mod geo;
 mod http;
 mod stats;
 mod store;

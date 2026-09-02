@@ -90,7 +90,9 @@ pub fn compute_stats(dir: &Path, now: u64) -> DashStats {
             e.locale.as_str()
         };
         *locales.entry(l.to_string()).or_default() += 1;
-        *regions.entry(region_of(&e.tz)).or_default() += 1;
+        *regions
+            .entry(crate::geo::country_of(&e.locale, &e.tz))
+            .or_default() += 1;
     }
     for o in os_latest.values() {
         *os.entry(os_family(o)).or_default() += 1;
@@ -105,7 +107,7 @@ pub fn compute_stats(dir: &Path, now: u64) -> DashStats {
         trend_values,
         versions: top_n(versions, 8),
         locales: top_n(locales, 10),
-        regions: top_n(regions, 8),
+        regions: top_n(regions, 12),
         os: top_n(os, 8),
     }
 }
@@ -118,31 +120,6 @@ fn top_n(map: HashMap<String, u32>, n: usize) -> Vec<(String, u32)> {
         v.push(("其他".into(), rest));
     }
     v
-}
-
-pub fn region_of(tz: &str) -> String {
-    for k in [
-        "Shanghai",
-        "Urumqi",
-        "Chongqing",
-        "Harbin",
-        "Kashgar",
-        "China Standard",
-    ] {
-        if tz.contains(k) {
-            return "中国大陆".into();
-        }
-    }
-    if tz.contains("Taipei") {
-        return "中国台湾".into();
-    }
-    if tz.contains("Hong_Kong") || tz.contains("Hong Kong") || tz.contains("Macau") {
-        return "中国港澳".into();
-    }
-    if tz.trim().is_empty() {
-        return "未知".into();
-    }
-    "其他/海外".into()
 }
 
 pub fn os_family(os: &str) -> String {
@@ -202,12 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn regions_and_os() {
-        assert_eq!(region_of("China Standard Time"), "中国大陆");
-        assert_eq!(region_of("Asia/Shanghai"), "中国大陆");
-        assert_eq!(region_of("Asia/Taipei"), "中国台湾");
-        assert_eq!(region_of("America/New_York"), "其他/海外");
-        assert_eq!(region_of(""), "未知");
+    fn os_families() {
         assert_eq!(os_family("Windows 11 23H2 x86_64"), "Windows 11");
         assert_eq!(os_family("macOS 15.1 arm64"), "macOS");
         assert_eq!(os_family(""), "未知");
