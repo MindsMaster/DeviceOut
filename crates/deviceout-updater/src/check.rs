@@ -5,11 +5,11 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 
 use deviceout_update::paths;
-use deviceout_update::{Cmp, Feed, State};
+use deviceout_update::{schedule, Cmp, Feed, State};
 
 use crate::{logutil, unix_now};
 
-const BACKOFF_SECS: i64 = 24 * 60 * 60;
+const FEED_MAX_BYTES: u64 = 64 * 1024;
 
 pub fn run(bundle: &Path, force: bool) -> Result<()> {
     let dll = deviceout_update::bundle_dll(bundle);
@@ -17,30 +17,31 @@ pub fn run(bundle: &Path, force: bool) -> Result<()> {
         bail!("bundle has no plugin binary: {}", dll.display());
     }
     let mut state = deviceout_update::load_state();
-    if !force {
-        if let Some(last) = state.last_check {
-            if unix_now().saturating_sub(last) < BACKOFF_SECS {
-                logutil::log("check: backoff");
-                return Ok(());
-            }
-        }
+    if !schedule::should_check(&state, unix_now(), force) {
+        logutil::log("check: backoff");
+        return Ok(());
     }
 
     state.last_attempt = Some(unix_now());
+    state.last_error = None;
     let _ = deviceout_update::save_state(&state);
 
     let feed_url = paths::BUILTIN_FEED_URL;
     logutil::log(&format!("check: feed {feed_url}"));
 
     let etag = if force { None } else { state.feed_etag.as_deref() };
-    let (bytes, etag) = match fetch_feed(feed_url, etag) {
-        Ok(Fetch::NotModified) => {
+    let (bytes, etag) = match fetch_feed(feed_url, etag)? {
+        Fetch::NotModified => {
             finish_ok(&mut state, None);
             logutil::log("check: 304");
             return Ok(());
         }
-        Ok(Fetch::Body { bytes, etag }) => (bytes, etag),
-        Err(e) => return Err(e),
+        Fetch::NothingPublished => {
+            finish_ok(&mut state, None);
+            logutil::log("check: no feed published");
+            return Ok(());
+        }
+        Fetch::Body { bytes, etag } => (bytes, etag),
     };
 
     let sig_url = format!("{feed_url}.sig");
@@ -94,18 +95,22 @@ fn current_version(bundle: &Path) -> String {
 
 enum Fetch {
     NotModified,
+    NothingPublished,
     Body { bytes: Vec<u8>, etag: Option<String> },
 }
 
 fn fetch_feed(url: &str, etag: Option<&str>) -> Result<Fetch> {
-    let agent = crate::http::agent(Duration::from_secs(20));
+    let agent = crate::http::agent_lenient(Duration::from_secs(20));
     let mut req = agent.get(url);
     if let Some(etag) = etag {
         req = req.header("If-None-Match", etag);
     }
     let mut resp = req.call()?;
-    if resp.status().as_u16() == 304 {
-        return Ok(Fetch::NotModified);
+    match resp.status().as_u16() {
+        304 => return Ok(Fetch::NotModified),
+        404 => return Ok(Fetch::NothingPublished),
+        200 => {}
+        code => bail!("feed http status {code}"),
     }
     let etag = resp
         .headers()
@@ -115,6 +120,7 @@ fn fetch_feed(url: &str, etag: Option<&str>) -> Result<Fetch> {
     let mut bytes = Vec::new();
     resp.body_mut()
         .as_reader()
+        .take(FEED_MAX_BYTES)
         .read_to_end(&mut bytes)
         .context("read feed")?;
     Ok(Fetch::Body { bytes, etag })
@@ -124,7 +130,10 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
     let agent = crate::http::agent(Duration::from_secs(30));
     let mut resp = agent.get(url).call()?;
     let mut bytes = Vec::new();
-    resp.body_mut().as_reader().read_to_end(&mut bytes)?;
+    resp.body_mut()
+        .as_reader()
+        .take(FEED_MAX_BYTES)
+        .read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 

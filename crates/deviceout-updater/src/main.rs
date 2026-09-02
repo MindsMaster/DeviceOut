@@ -84,7 +84,7 @@ fn main() {
     if let Err(e) = check::run(&bundle, force) {
         logutil::log(&format!("check: {e:#}"));
         let mut state = deviceout_update::load_state();
-        state.last_error = Some(e.to_string());
+        state.last_error = Some(format!("{e:#}"));
         let _ = deviceout_update::save_state(&state);
     }
 }

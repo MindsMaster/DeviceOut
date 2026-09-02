@@ -30,10 +30,8 @@ pub fn spawn_ping(version: &str) {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let mut ui = load_ui_json();
-    if let Some(last) = ui.last_ping_unix {
-        if now.saturating_sub(last) < PING_GAP_SECS {
-            return;
-        }
+    if crate::schedule::within(ui.last_ping_unix, now, PING_GAP_SECS) {
+        return;
     }
     ui.last_ping_unix = Some(now);
     let _ = save_ui_json(&ui);

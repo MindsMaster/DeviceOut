@@ -4,6 +4,7 @@ mod lock;
 pub mod outbox;
 pub mod paths;
 mod pending;
+pub mod schedule;
 mod sign;
 mod spawn;
 mod state;

@@ -11,9 +11,9 @@ pub struct State {
     #[serde(default)]
     pub last_error: Option<String>,
     #[serde(default)]
-    pub feed_etag: Option<String>,
+    pub last_install_error: Option<String>,
     #[serde(default)]
-    pub feed_url: Option<String>,
+    pub feed_etag: Option<String>,
     #[serde(default)]
     pub last_latest: Option<String>,
 }

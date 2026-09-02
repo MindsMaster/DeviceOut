@@ -38,7 +38,7 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
         Ok(()) => {
             let _ = std::fs::remove_dir_all(paths::pending_dir());
             let mut state = deviceout_update::load_state();
-            state.last_error = None;
+            state.last_install_error = None;
             let _ = deviceout_update::save_state(&state);
             cleanup_stale_updaters();
             logutil::log(&format!("apply: ok {}", manifest.version));
@@ -54,7 +54,7 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
         Err(e) => {
             logutil::log(&format!("apply: fail {e:#}"));
             let mut state = deviceout_update::load_state();
-            state.last_error = Some(e.to_string());
+            state.last_install_error = Some(format!("{e:#}"));
             let _ = deviceout_update::save_state(&state);
             alert(
                 &format!(

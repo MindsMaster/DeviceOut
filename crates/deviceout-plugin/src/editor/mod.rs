@@ -656,17 +656,18 @@ fn update_status_text(
             ),
         );
     }
+    if let Some(err) = st.last_install_error.as_deref() {
+        return (
+            i18n::pick("安装失败", "Install failed").into(),
+            theme::RED,
+            Some(error_tip(err)),
+        );
+    }
     if let Some(err) = st.last_error.as_deref() {
-        let tip: String = err
-            .trim()
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(120)
-            .collect();
         return (
             i18n::pick("检查失败", "Check failed").into(),
             theme::RED,
-            Some(tip),
+            Some(error_tip(err)),
         );
     }
     if let Some(latest) = st.last_latest.as_deref() {
@@ -689,6 +690,14 @@ fn update_status_text(
         }
     }
     (format!("v{current}"), theme::TEXT_DIM, None)
+}
+
+fn error_tip(err: &str) -> String {
+    err.trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(160)
+        .collect()
 }
 
 fn feedback_row(
