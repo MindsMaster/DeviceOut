@@ -2,22 +2,24 @@ mod admin;
 mod api;
 mod assets;
 mod config;
+mod http;
 mod stats;
 mod store;
 mod util;
 
 use std::collections::HashMap;
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tiny_http::{Method, Response, Server, StatusCode};
-
 use config::{env_nonempty, env_u32, load_dotenv, load_or_create_admin_path, Config, Limits};
+use http::{Handler, Method, Request};
 use store::{count_lines, load_seen, pings_file, prune_old_pings};
-use util::{normalize_path, now_epoch, secure};
+use util::{normalize_path, now_epoch, secure, text};
 
 const PING_PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+const WORKERS: usize = 8;
 
 fn main() {
     load_dotenv();
@@ -56,7 +58,7 @@ fn main() {
         seen.len(),
         today_pings
     );
-    let server = Server::http(&bind).expect("bind");
+    let listener = TcpListener::bind(&bind).expect("bind");
     eprintln!(
         "deviceout-feedback-ingest {bind} token={} admin=/deviceout-feedback/{}/",
         if cfg.token.is_some() { "on" } else { "off" },
@@ -71,30 +73,36 @@ fn main() {
         last_ping_prune: Instant::now(),
     }));
 
-    let delete_path = format!("/{}/delete", cfg.admin_path);
-    for mut req in server.incoming_requests() {
-        if cfg.kill || std::env::var_os("FEEDBACK_DISABLED").is_some() {
-            let _ = req.respond(secure(
-                Response::from_string("disabled").with_status_code(StatusCode(503)),
-            ));
-            continue;
-        }
-        {
-            let mut st = state.lock().unwrap();
-            if st.last_ping_prune.elapsed() > PING_PRUNE_INTERVAL {
-                st.last_ping_prune = Instant::now();
-                prune_old_pings(&cfg.dir, now_epoch());
-            }
-        }
-        let method = req.method().clone();
-        let path = normalize_path(req.url());
-        let response = match method {
-            Method::Get => admin::handle_get(&req, &path, &cfg, &state),
-            Method::Post if path == "/ping" => api::handle_ping(&mut req, &cfg, &state),
-            Method::Post if path == delete_path => admin::handle_admin_delete(&mut req, &cfg, &state),
-            Method::Post => api::handle_post(&mut req, &cfg, &state),
-            _ => Response::from_string("method").with_status_code(StatusCode(405)),
-        };
-        let _ = req.respond(secure(response));
+    let cfg = Arc::new(cfg);
+    let handler: Handler = Arc::new(move |req: Request| route(&req, &cfg, &state));
+    let limits = http::Limits {
+        body_bytes: api::MAX_BODY,
+        ..http::Limits::default()
+    };
+    if let Err(e) = http::serve(listener, WORKERS, limits, handler) {
+        eprintln!("server stopped: {e}");
     }
+}
+
+fn route(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> http::Response {
+    if cfg.kill {
+        return secure(text(503, "disabled"));
+    }
+    {
+        let mut st = state.lock().unwrap();
+        if st.last_ping_prune.elapsed() > PING_PRUNE_INTERVAL {
+            st.last_ping_prune = Instant::now();
+            prune_old_pings(&cfg.dir, now_epoch());
+        }
+    }
+    let path = normalize_path(&req.target);
+    let delete_path = format!("/{}/delete", cfg.admin_path);
+    let response = match req.method {
+        Method::Get | Method::Head => admin::handle_get(req, &path, cfg, state),
+        Method::Post if path == "/ping" => api::handle_ping(req, cfg, state),
+        Method::Post if path == delete_path => admin::handle_admin_delete(req, cfg, state),
+        Method::Post => api::handle_post(req, cfg, state),
+        Method::Other => text(405, "method"),
+    };
+    secure(response)
 }

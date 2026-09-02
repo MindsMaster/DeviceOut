@@ -1,12 +1,10 @@
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tiny_http::{Header, Response};
-
 use crate::config::{Hit, Limits};
+use crate::http::{Request, Response};
 
-pub type Resp = Response<Cursor<Vec<u8>>>;
+pub type Resp = Response;
 
 pub fn normalize_path(url: &str) -> String {
     let path = url.split('?').next().unwrap_or(url);
@@ -19,22 +17,20 @@ pub fn normalize_path(url: &str) -> String {
     }
 }
 
+pub fn text(status: u16, body: &str) -> Resp {
+    Response::text(status, body)
+}
+
 pub fn ok_json() -> Resp {
     json_ok("{\"ok\":true}")
 }
 
 pub fn json_ok(body: &str) -> Resp {
-    let mut response = Response::from_data(body.as_bytes().to_vec());
-    response.add_header(Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap());
-    response
+    Response::bytes(200, body.as_bytes().to_vec(), "application/json")
 }
 
 pub fn html(body: String) -> Resp {
-    let mut resp = Response::from_data(body.into_bytes());
-    resp.add_header(
-        Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap(),
-    );
-    resp
+    Response::bytes(200, body.into_bytes(), "text/html; charset=utf-8")
 }
 
 pub fn secure(mut resp: Resp) -> Resp {
@@ -48,7 +44,7 @@ pub fn secure(mut resp: Resp) -> Resp {
             "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'",
         ),
     ] {
-        resp.add_header(Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap());
+        resp = resp.header(k, v);
     }
     resp
 }
@@ -159,12 +155,8 @@ pub fn esc(s: &str) -> String {
     out
 }
 
-pub fn client_ip(req: &tiny_http::Request) -> String {
-    let peer = req
-        .remote_addr()
-        .map(|a| a.ip())
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "unknown".into());
+pub fn client_ip(req: &Request) -> String {
+    let peer = req.peer.ip().to_string();
     if peer == "127.0.0.1" || peer == "::1" {
         let xff = header_value(req, "X-Forwarded-For");
         let real = header_value(req, "X-Real-IP");
@@ -194,14 +186,8 @@ fn plausible_ip(s: &str) -> bool {
             .all(|c| c.is_ascii_hexdigit() || c == '.' || c == ':')
 }
 
-pub fn header_value(req: &tiny_http::Request, name: &str) -> Option<String> {
-    req.headers().iter().find_map(|h| {
-        if format!("{}", h.field).eq_ignore_ascii_case(name) {
-            Some(h.value.as_str().to_string())
-        } else {
-            None
-        }
-    })
+pub fn header_value(req: &Request, name: &str) -> Option<String> {
+    req.header(name).map(str::to_string)
 }
 
 pub fn over_limit(map: &HashMap<String, Vec<Hit>>, key: &str, max: u32) -> bool {

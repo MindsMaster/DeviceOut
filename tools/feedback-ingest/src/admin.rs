@@ -1,29 +1,30 @@
-use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use tiny_http::{Header, Response, StatusCode};
-
 use crate::assets;
 use crate::config::{Config, Hit, Limits};
+use crate::http::{Request, Response};
 use crate::stats::{compute_stats, pairs_json};
 use crate::store::{list_tickets, load_ticket, safe_ticket, ticket_time, valid_ticket_id, Stored};
 use crate::util::{
-    b64, client_ip, ct_eq, esc, header_value, html, json_ok, now_epoch, over_limit, prune, Resp,
+    b64, client_ip, ct_eq, esc, header_value, html, json_ok, now_epoch, over_limit, prune, text,
+    Resp,
 };
 
-pub fn handle_get(req: &tiny_http::Request, path: &str, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+const DELETE_MAX_BODY: usize = 4096;
+
+pub fn handle_get(req: &Request, path: &str, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     if path == "/" {
-        return Response::from_string("ok");
+        return text(200, "ok");
     }
     let Some(rest) = path.strip_prefix(&format!("/{}", cfg.admin_path)) else {
-        return Response::from_string("not found").with_status_code(StatusCode(404));
+        return text(404, "not found");
     };
     handle_admin(req, rest, cfg, state)
 }
 
-fn handle_admin(req: &tiny_http::Request, rest: &str, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+fn handle_admin(req: &Request, rest: &str, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     if let Some(resp) = admin_gate(req, cfg, state) {
         return resp;
     }
@@ -36,24 +37,24 @@ fn handle_admin(req: &tiny_http::Request, rest: &str, cfg: &Config, state: &Mute
         return json_ok(&dashboard_json(&cfg.dir));
     }
     if !safe_ticket(rest) {
-        return Response::from_string("not found").with_status_code(StatusCode(404));
+        return text(404, "not found");
     }
     match load_ticket(&cfg.dir, rest) {
         Some(item) => html(admin_detail(&item, &prefix)),
-        None => Response::from_string("not found").with_status_code(StatusCode(404)),
+        None => text(404, "not found"),
     }
 }
 
-fn admin_gate(req: &tiny_http::Request, cfg: &Config, state: &Mutex<Limits>) -> Option<Resp> {
+fn admin_gate(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Option<Resp> {
     let Some(password) = cfg.admin_password.as_deref() else {
-        return Some(Response::from_string("not found").with_status_code(StatusCode(404)));
+        return Some(text(404, "not found"));
     };
     let ip = client_ip(req);
     {
         let mut st = state.lock().unwrap();
         prune(&mut st);
         if over_limit(&st.admin_fail_ip, &ip, cfg.admin_fail_hour) {
-            return Some(Response::from_string("rate").with_status_code(StatusCode(429)));
+            return Some(text(429, "rate"));
         }
     }
     if !admin_authorized(req, password) {
@@ -63,57 +64,42 @@ fn admin_gate(req: &tiny_http::Request, cfg: &Config, state: &Mutex<Limits>) -> 
             .entry(ip)
             .or_default()
             .push(Hit { at: Instant::now() });
-        let mut resp = Response::from_string("auth").with_status_code(StatusCode(401));
-        resp.add_header(
-            Header::from_bytes(&b"WWW-Authenticate"[..], &b"Basic realm=\"DeviceOut\""[..]).unwrap(),
-        );
-        return Some(resp);
+        return Some(text(401, "auth").header("WWW-Authenticate", "Basic realm=\"DeviceOut\""));
     }
     None
 }
 
-pub fn handle_admin_delete(
-    req: &mut tiny_http::Request,
-    cfg: &Config,
-    state: &Mutex<Limits>,
-) -> Resp {
+pub fn handle_admin_delete(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     if let Some(resp) = admin_gate(req, cfg, state) {
         return resp;
     }
     let prefix = format!("/deviceout-feedback/{}", cfg.admin_path);
-    let mut body = Vec::new();
-    if req.as_reader().take(4096).read_to_end(&mut body).is_err() {
-        return Response::from_string("read").with_status_code(StatusCode(400));
+    if req.body.len() > DELETE_MAX_BODY {
+        return text(413, "too large");
     }
-    let body = String::from_utf8_lossy(&body);
+    let body = String::from_utf8_lossy(&req.body);
     let ticket = body
         .split('&')
         .find_map(|p| p.strip_prefix("ticket="))
         .unwrap_or("")
         .trim();
     if !valid_ticket_id(ticket) {
-        return Response::from_string("not found").with_status_code(StatusCode(404));
+        return text(404, "not found");
     }
     match std::fs::remove_file(cfg.dir.join(format!("{ticket}.json"))) {
         Ok(()) => {
             eprintln!("deleted ticket {ticket}");
-            let mut resp = Response::from_string("").with_status_code(StatusCode(303));
-            resp.add_header(
-                Header::from_bytes(&b"Location"[..], format!("{prefix}/").as_bytes()).unwrap(),
-            );
-            resp
+            Response::empty(303).header("Location", &format!("{prefix}/"))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Response::from_string("not found").with_status_code(StatusCode(404))
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => text(404, "not found"),
         Err(e) => {
             eprintln!("delete ticket {ticket} error: {e}");
-            Response::from_string("store").with_status_code(StatusCode(500))
+            text(500, "store")
         }
     }
 }
 
-fn admin_authorized(req: &tiny_http::Request, password: &str) -> bool {
+fn admin_authorized(req: &Request, password: &str) -> bool {
     let Some(header) = header_value(req, "Authorization") else {
         return false;
     };
