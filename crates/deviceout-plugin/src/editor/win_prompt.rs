@@ -253,7 +253,7 @@ unsafe fn feedback_impl(
                     }
                 }
             }
-            if IsDialogMessageW(hwnd, &mut msg) == 0 {
+            if IsDialogMessageW(hwnd, &msg) == 0 {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
@@ -294,7 +294,7 @@ impl ThreadDpiScope {
                 };
             }
             type FnSetThread = unsafe extern "system" fn(isize) -> isize;
-            match GetProcAddress(user32, b"SetThreadDpiAwarenessContext\0".as_ptr()) {
+            match GetProcAddress(user32, c"SetThreadDpiAwarenessContext".as_ptr().cast()) {
                 Some(p) => {
                     let f: FnSetThread = std::mem::transmute(p);
                     let previous = f(-4isize);
@@ -882,7 +882,7 @@ unsafe fn dpi_for(hwnd: HWND) -> u32 {
         let user32 = GetModuleHandleW(wide("user32.dll").as_ptr());
         if !user32.is_null() {
             type FnGetDpi = unsafe extern "system" fn(HWND) -> u32;
-            if let Some(p) = GetProcAddress(user32, b"GetDpiForWindow\0".as_ptr()) {
+            if let Some(p) = GetProcAddress(user32, c"GetDpiForWindow".as_ptr().cast()) {
                 let f: FnGetDpi = std::mem::transmute(p);
                 let dpi = f(hwnd);
                 if dpi != 0 {
@@ -902,7 +902,7 @@ unsafe fn with_dwm_attr(hwnd: HWND, apply: impl Fn(FnSetAttr, HWND)) {
         if dwm.is_null() {
             return;
         }
-        if let Some(p) = GetProcAddress(dwm, b"DwmSetWindowAttribute\0".as_ptr()) {
+        if let Some(p) = GetProcAddress(dwm, c"DwmSetWindowAttribute".as_ptr().cast()) {
             let f: FnSetAttr = std::mem::transmute(p);
             apply(f, hwnd);
         }
@@ -937,7 +937,7 @@ unsafe fn enable_dark_scrollbar(hwnd: HWND) {
             return;
         }
         type FnSetTheme = unsafe extern "system" fn(HWND, *const u16, *const u16) -> i32;
-        if let Some(p) = GetProcAddress(uxtheme, b"SetWindowTheme\0".as_ptr()) {
+        if let Some(p) = GetProcAddress(uxtheme, c"SetWindowTheme".as_ptr().cast()) {
             let f: FnSetTheme = std::mem::transmute(p);
             f(hwnd, wide("DarkMode_Explorer").as_ptr(), null_mut());
         }

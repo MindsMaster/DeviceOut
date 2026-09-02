@@ -92,7 +92,7 @@ fn user_locale_name() -> Option<String> {
         if module.is_null() {
             return None;
         }
-        let p = GetProcAddress(module, b"GetUserDefaultLocaleName\0".as_ptr())?;
+        let p = GetProcAddress(module, c"GetUserDefaultLocaleName".as_ptr().cast())?;
         let f: FnGetUserDefaultLocaleName = std::mem::transmute(p);
         let mut buf = [0u16; 85];
         let len = f(buf.as_mut_ptr(), buf.len() as i32);

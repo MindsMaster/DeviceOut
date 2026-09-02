@@ -98,7 +98,7 @@ fn post_item(item: &deviceout_update::OutboxItem) -> Result<String, SendErr> {
             .ok()
             .and_then(|r| r.ticket)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("DO-{}", &item.id.chars().rev().take(8).collect::<String>()));
+            .unwrap_or_else(|| format!("DO-{}", item.id.chars().rev().take(8).collect::<String>()));
         return Ok(ticket);
     }
     let msg = short_http_error(code, &text);

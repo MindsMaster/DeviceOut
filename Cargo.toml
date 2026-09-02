@@ -22,9 +22,6 @@ repository = "https://github.com/MindsMaster/DeviceOut"
 unsafe_op_in_unsafe_fn = "deny"
 missing_debug_implementations = "warn"
 
-[workspace.lints.clippy]
-undocumented_unsafe_blocks = "warn"
-
 [profile.release]
 opt-level = 3
 lto = "fat"

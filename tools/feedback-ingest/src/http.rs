@@ -223,10 +223,9 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-fn parse_head(
-    head: &str,
-    max_headers: usize,
-) -> Result<(Method, String, Vec<(String, String)>), u16> {
+type Head = (Method, String, Vec<(String, String)>);
+
+fn parse_head(head: &str, max_headers: usize) -> Result<Head, u16> {
     let mut lines = head.split("\r\n");
     let request_line = lines.next().ok_or(400u16)?;
     let mut parts = request_line.split(' ');

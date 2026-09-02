@@ -35,10 +35,12 @@ pub(crate) struct Wiring {
     pub devices: SharedDevices,
 }
 
+type PromptResult = Arc<Mutex<Option<Option<(String, String)>>>>;
+
 struct PromptWait {
     kind: FeedbackKind,
     diag: Option<String>,
-    done: Arc<Mutex<Option<Option<(String, String)>>>>,
+    done: PromptResult,
     #[cfg(windows)]
     window: win_prompt::PromptWindow,
     #[cfg(windows)]
@@ -98,7 +100,7 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
 
             let ping_due = state
                 .last_ping
-                .map_or(true, |t| t.elapsed() >= Duration::from_secs(15 * 60));
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(15 * 60));
             if ping_due {
                 state.last_ping = Some(Instant::now());
                 deviceout_update::telemetry::spawn_ping(env!("CARGO_PKG_VERSION"));
@@ -1007,7 +1009,7 @@ fn thousands(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
