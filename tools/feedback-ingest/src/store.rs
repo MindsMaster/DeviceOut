@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -126,11 +127,16 @@ pub fn valid_ticket_id(id: &str) -> bool {
             .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
+static LAST_TICKET_MS: Mutex<u128> = Mutex::new(0);
+
 pub fn ticket_id() -> String {
-    let n = SystemTime::now()
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
+    let mut last = LAST_TICKET_MS.lock().unwrap_or_else(|p| p.into_inner());
+    let n = now.max(*last + 1);
+    *last = n;
     format!("DO-{n:x}")
 }
 
@@ -158,7 +164,16 @@ pub fn forward(dir: &Path, payload: &Payload, ticket: &str, ip: &str) -> bool {
     let Ok(bytes) = serde_json::to_vec_pretty(&record) else {
         return false;
     };
-    if std::fs::write(&path, bytes).is_err() {
+    if std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .is_err()
+    {
+        return false;
+    }
+    if write_replace(&path, &bytes).is_err() {
+        let _ = std::fs::remove_file(&path);
         return false;
     }
     eprintln!(
@@ -166,6 +181,18 @@ pub fn forward(dir: &Path, payload: &Payload, ticket: &str, ip: &str) -> bool {
         payload.feedback_id, payload.kind
     );
     true
+}
+
+fn write_replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
 }
 
 pub fn pings_file(dir: &Path, epoch: u64) -> PathBuf {
@@ -233,12 +260,7 @@ pub fn update_seen(dir: &Path, ping: &PingPayload, ip: &str, now: u64) -> std::i
         }
     }
     let bytes = serde_json::to_vec(&map)?;
-    let path = stats.join("seen.json");
-    let tmp = stats.join("seen.json.tmp");
-    std::fs::write(&tmp, bytes)?;
-    let _ = std::fs::remove_file(&path);
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    write_replace(&stats.join("seen.json"), &bytes)
 }
 
 pub fn prune_old_pings(dir: &Path, now: u64) {
@@ -278,6 +300,35 @@ mod tests {
         assert!(!valid_ticket_id("../DO-1991bf2a3c8"));
         assert!(!valid_ticket_id("DO-zz"));
         assert!(!valid_ticket_id(&format!("DO-{}", "a".repeat(33))));
+    }
+
+    #[test]
+    fn ticket_ids_never_repeat_within_a_process() {
+        let ids: Vec<String> = (0..64).map(|_| ticket_id()).collect();
+        for pair in ids.windows(2) {
+            let a = u128::from_str_radix(&pair[0][3..], 16).unwrap();
+            let b = u128::from_str_radix(&pair[1][3..], 16).unwrap();
+            assert!(b > a, "{} then {}", pair[0], pair[1]);
+        }
+    }
+
+    #[test]
+    fn forward_refuses_to_overwrite_an_existing_ticket() {
+        let dir = std::env::temp_dir().join(format!("fb-forward-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let payload = Payload {
+            feedback_id: "abc".into(),
+            message: "first".into(),
+            contact: None,
+            diag: String::new(),
+            kind: "bug".into(),
+            version: "1.0.0".into(),
+        };
+        assert!(forward(&dir, &payload, "DO-1", "1.1.1.1"));
+        assert!(!forward(&dir, &payload, "DO-1", "1.1.1.1"));
+        assert_eq!(load_ticket(&dir, "DO-1").unwrap().message, "first");
+        assert!(!dir.join("DO-1.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
