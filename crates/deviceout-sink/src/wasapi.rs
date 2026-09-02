@@ -53,6 +53,14 @@ pub(crate) unsafe fn parse_format(wfx: *const WAVEFORMATEX) -> Result<StreamForm
     let channels = base.nChannels;
 
     let sample_format = if tag == WAVE_FORMAT_EXTENSIBLE_TAG {
+        let ext_payload = std::mem::size_of::<WAVEFORMATEXTENSIBLE>() - std::mem::size_of::<WAVEFORMATEX>();
+        let cb_size = base.cbSize;
+        if usize::from(cb_size) < ext_payload {
+            return Err(SinkError::UnsupportedFormat {
+                requested: "32 位浮点".into(),
+                supported: format!("WAVEFORMATEXTENSIBLE 头不完整（cbSize={cb_size}）"),
+            });
+        }
         let ext = unsafe { &*(wfx as *const WAVEFORMATEXTENSIBLE) };
         let sub = ext.SubFormat;
         if sub == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT {
@@ -86,10 +94,9 @@ pub(crate) unsafe fn parse_format(wfx: *const WAVEFORMATEX) -> Result<StreamForm
 fn int_format(bits: u16) -> Result<SampleFormat, SinkError> {
     match bits {
         16 => Ok(SampleFormat::I16),
-        24 => Ok(SampleFormat::I24In32),
         32 => Ok(SampleFormat::I32),
         other => Err(SinkError::UnsupportedFormat {
-            requested: "16/24/32 位整型".into(),
+            requested: "16/32 位整型".into(),
             supported: format!("{other} 位整型"),
         }),
     }
@@ -200,4 +207,69 @@ pub fn find_device_by_name_in(needle: &str, direction: Direction) -> Result<Devi
         .into_iter()
         .find(|d| d.name.contains(needle))
         .ok_or_else(|| SinkError::DeviceNotFound(needle.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Media::Audio::WAVEFORMATEXTENSIBLE_0;
+
+    fn base(tag: u16, bits: u16, cb: u16) -> WAVEFORMATEX {
+        WAVEFORMATEX {
+            wFormatTag: tag,
+            nChannels: 2,
+            nSamplesPerSec: 48_000,
+            nAvgBytesPerSec: 48_000 * 2 * u32::from(bits) / 8,
+            nBlockAlign: 2 * bits / 8,
+            wBitsPerSample: bits,
+            cbSize: cb,
+        }
+    }
+
+    fn extensible(bits: u16, sub: GUID) -> WAVEFORMATEXTENSIBLE {
+        WAVEFORMATEXTENSIBLE {
+            Format: base(WAVE_FORMAT_EXTENSIBLE_TAG, bits, 22),
+            Samples: WAVEFORMATEXTENSIBLE_0 {
+                wValidBitsPerSample: bits,
+            },
+            dwChannelMask: 3,
+            SubFormat: sub,
+        }
+    }
+
+    #[test]
+    fn plain_tags_map_to_formats() {
+        let pcm16 = base(WAVE_FORMAT_PCM_TAG, 16, 0);
+        let f = unsafe { parse_format(&pcm16) }.unwrap();
+        assert_eq!(f.sample_format, SampleFormat::I16);
+        assert_eq!(f.frame_bytes(), 4);
+
+        let float = base(WAVE_FORMAT_IEEE_FLOAT_TAG, 32, 0);
+        let f = unsafe { parse_format(&float) }.unwrap();
+        assert_eq!(f.sample_format, SampleFormat::F32);
+        assert_eq!(f.frame_bytes(), 8);
+    }
+
+    #[test]
+    fn extensible_tags_use_the_subformat() {
+        let ext = extensible(32, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
+        let f = unsafe { parse_format(&ext.Format) }.unwrap();
+        assert_eq!(f.sample_format, SampleFormat::F32);
+
+        let ext = extensible(32, KSDATAFORMAT_SUBTYPE_PCM);
+        let f = unsafe { parse_format(&ext.Format) }.unwrap();
+        assert_eq!(f.sample_format, SampleFormat::I32);
+    }
+
+    #[test]
+    fn packed_24_bit_and_unknown_layouts_are_refused() {
+        let ext = extensible(24, KSDATAFORMAT_SUBTYPE_PCM);
+        assert!(unsafe { parse_format(&ext.Format) }.is_err());
+
+        let unknown = extensible(32, GUID::from_u128(0x1234));
+        assert!(unsafe { parse_format(&unknown.Format) }.is_err());
+
+        let short = base(WAVE_FORMAT_EXTENSIBLE_TAG, 32, 0);
+        assert!(unsafe { parse_format(&short) }.is_err());
+    }
 }

@@ -16,16 +16,35 @@ use crate::AudioSink;
 const WAIT_TIMEOUT_MS: u32 = 2000;
 
 #[derive(Debug)]
+struct EventHandle(HANDLE);
+
+impl EventHandle {
+    fn new() -> Result<Self, SinkError> {
+        let handle = unsafe { CreateEventW(None, false, false, None) }
+            .map_err(|e| SinkError::init_from_hresult("创建同步事件失败", e))?;
+        Ok(Self(handle))
+    }
+}
+
+impl Drop for EventHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct WasapiSink {
-    _com: ComGuard,
-    client: IAudioClient,
     render: IAudioRenderClient,
-    event: HANDLE,
+    client: IAudioClient,
+    event: EventHandle,
     format: StreamFormat,
     buffer_frames: u32,
     period_frames: usize,
     stream_latency_ms: Option<f64>,
     running: bool,
+    _com: ComGuard,
 }
 
 unsafe impl Send for WasapiSink {}
@@ -59,10 +78,9 @@ impl WasapiSink {
             init.map_err(|e| SinkError::init_from_hresult("初始化音频流失败", e))?;
             let format = format?;
 
-            let event = CreateEventW(None, false, false, None)
-                .map_err(|e| SinkError::init_from_hresult("创建同步事件失败", e))?;
+            let event = EventHandle::new()?;
             client
-                .SetEventHandle(event)
+                .SetEventHandle(event.0)
                 .map_err(|e| SinkError::init_from_hresult("绑定同步事件失败", e))?;
 
             let buffer_frames = client
@@ -83,15 +101,15 @@ impl WasapiSink {
             let stream_latency_ms = stream_latency_ms(&client);
 
             Ok(Self {
-                _com: com,
-                client,
                 render,
+                client,
                 event,
                 format,
                 buffer_frames,
                 period_frames: period_frames.max(1),
                 stream_latency_ms,
                 running: false,
+                _com: com,
             })
         }
     }
@@ -132,7 +150,7 @@ impl WasapiSink {
     }
 
     fn wait_for_device(&self) -> Result<(), SinkError> {
-        let state = unsafe { WaitForSingleObject(self.event, WAIT_TIMEOUT_MS) };
+        let state = unsafe { WaitForSingleObject(self.event.0, WAIT_TIMEOUT_MS) };
         if state == WAIT_OBJECT_0 {
             Ok(())
         } else {
@@ -219,9 +237,6 @@ impl AudioSink for WasapiSink {
 impl Drop for WasapiSink {
     fn drop(&mut self) {
         let _ = self.stop();
-        unsafe {
-            let _ = CloseHandle(self.event);
-        }
     }
 }
 
@@ -243,14 +258,14 @@ unsafe fn write_samples(dst: *mut u8, src: &[f32], fmt: SampleFormat) {
             let out = dst.cast::<i16>();
             for (i, &s) in src.iter().enumerate() {
                 let v = (s.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
-                unsafe { out.add(i).write(v) };
+                unsafe { out.add(i).write_unaligned(v) };
             }
         }
-        SampleFormat::I24In32 | SampleFormat::I32 => {
+        SampleFormat::I32 => {
             let out = dst.cast::<i32>();
             for (i, &s) in src.iter().enumerate() {
                 let v = (f64::from(s.clamp(-1.0, 1.0)) * f64::from(i32::MAX)) as i32;
-                unsafe { out.add(i).write(v) };
+                unsafe { out.add(i).write_unaligned(v) };
             }
         }
     }
@@ -265,5 +280,35 @@ mod tests {
         assert_eq!(hns_to_ms(10_000), 1.0);
         assert_eq!(hns_to_ms(132_000), 13.2);
         assert_eq!(hns_to_ms(0), 0.0);
+    }
+
+    fn rendered(fmt: SampleFormat, src: &[f32]) -> Vec<u8> {
+        let mut buf = vec![0xAAu8; src.len() * fmt.bytes() + 8];
+        unsafe { write_samples(buf.as_mut_ptr(), src, fmt) };
+        assert!(buf[src.len() * fmt.bytes()..].iter().all(|&b| b == 0xAA));
+        buf.truncate(src.len() * fmt.bytes());
+        buf
+    }
+
+    #[test]
+    fn every_format_writes_exactly_bytes_per_sample() {
+        let src = [1.0f32, -1.0, 0.0, 2.0];
+        let i16s: Vec<i16> = rendered(SampleFormat::I16, &src)
+            .chunks(2)
+            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        assert_eq!(i16s, [i16::MAX, -i16::MAX, 0, i16::MAX]);
+
+        let i32s: Vec<i32> = rendered(SampleFormat::I32, &src)
+            .chunks(4)
+            .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        assert_eq!(i32s, [i32::MAX, -i32::MAX, 0, i32::MAX]);
+
+        let f32s: Vec<f32> = rendered(SampleFormat::F32, &src)
+            .chunks(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        assert_eq!(f32s, src);
     }
 }

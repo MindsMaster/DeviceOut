@@ -4,7 +4,6 @@ use std::fmt;
 pub enum SampleFormat {
     F32,
     I16,
-    I24In32,
     I32,
 }
 
@@ -12,7 +11,7 @@ impl SampleFormat {
     pub fn bytes(self) -> usize {
         match self {
             Self::I16 => 2,
-            Self::F32 | Self::I24In32 | Self::I32 => 4,
+            Self::F32 | Self::I32 => 4,
         }
     }
 }
@@ -22,7 +21,6 @@ impl fmt::Display for SampleFormat {
         match self {
             Self::F32 => write!(f, "32 位浮点"),
             Self::I16 => write!(f, "16 位整型"),
-            Self::I24In32 => write!(f, "24 位整型(32 位容器)"),
             Self::I32 => write!(f, "32 位整型"),
         }
     }
