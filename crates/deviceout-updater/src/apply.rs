@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 
 use deviceout_update::paths;
 
-use crate::logutil;
+use crate::{job, logutil};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const INNO_TIMEOUT_MS: u32 = 120_000;
@@ -67,21 +67,20 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
     }
 }
 
+fn inno_args(bundle: &Path, log_path: &Path) -> Vec<String> {
+    vec![
+        "/VERYSILENT".into(),
+        "/SUPPRESSMSGBOXES".into(),
+        "/NORESTART".into(),
+        "/NOCLOSEAPPLICATIONS".into(),
+        format!("/DIR={}", bundle.display()),
+        format!("/LOG={}", log_path.display()),
+    ]
+}
+
 fn run_inno(manifest: &deviceout_update::PendingManifest, bundle: &Path) -> Result<()> {
     let setup = paths::pending_setup_path();
     let log_path = paths::appdata_dir().join("inno-setup.log");
-    let mut cmd = Command::new(&setup);
-    cmd.arg("/VERYSILENT")
-        .arg("/SUPPRESSMSGBOXES")
-        .arg("/NORESTART")
-        .arg("/CLOSEAPPLICATIONS=no")
-        .arg(format!("/DIR={}", bundle.display()))
-        .arg(format!("/LOG={}", log_path.display()));
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
 
     logutil::log(&format!(
         "apply: inno version={} dir={}",
@@ -89,14 +88,12 @@ fn run_inno(manifest: &deviceout_update::PendingManifest, bundle: &Path) -> Resu
         bundle.display()
     ));
 
-    let mut child = cmd.spawn().context("spawn inno")?;
-    let timed_out = wait_or_kill(&mut child, INNO_TIMEOUT_MS)?;
-    if timed_out {
-        bail!("inno timed out after {INNO_TIMEOUT_MS} ms");
-    }
-    let status = child.wait().context("wait inno")?;
-    if !status.success() {
-        bail!("inno exit {:?}", status.code());
+    match job::run_tree(&setup, &inno_args(bundle, &log_path), INNO_TIMEOUT_MS)
+        .context("run inno")?
+    {
+        job::Outcome::TimedOut => bail!("inno timed out after {INNO_TIMEOUT_MS} ms"),
+        job::Outcome::Exited(0) => {}
+        job::Outcome::Exited(code) => bail!("inno exit {code}"),
     }
 
     let dll = deviceout_update::bundle_dll(bundle);
@@ -197,27 +194,23 @@ fn alert(text: &str, retry: bool) -> bool {
     }
 }
 
-#[cfg(windows)]
-fn wait_or_kill(child: &mut std::process::Child, timeout_ms: u32) -> Result<bool> {
-    use std::os::windows::io::AsRawHandle;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
-    use windows_sys::Win32::System::Threading::{TerminateProcess, WaitForSingleObject};
-
-    let handle = child.as_raw_handle();
-    let rc = unsafe { WaitForSingleObject(handle, timeout_ms) };
-    match rc {
-        WAIT_OBJECT_0 => Ok(false),
-        WAIT_TIMEOUT => {
-            unsafe { TerminateProcess(handle, 1) };
-            Ok(true)
-        }
-        _ => Ok(false),
+    #[test]
+    fn inno_switches_use_documented_spellings() {
+        let args = inno_args(Path::new(r"C:\x\DeviceOut.vst3"), Path::new(r"C:\x\inno.log"));
+        assert_eq!(
+            args,
+            [
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/NOCLOSEAPPLICATIONS",
+                r"/DIR=C:\x\DeviceOut.vst3",
+                r"/LOG=C:\x\inno.log",
+            ]
+        );
     }
-}
-
-#[cfg(not(windows))]
-fn wait_or_kill(child: &mut std::process::Child, _timeout_ms: u32) -> Result<bool> {
-    let _ = child.wait();
-    Ok(false)
 }

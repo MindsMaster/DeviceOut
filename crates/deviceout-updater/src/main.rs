@@ -3,6 +3,7 @@
 mod apply;
 mod check;
 mod http;
+mod job;
 mod logutil;
 mod mutex;
 mod outbox_send;

@@ -126,7 +126,7 @@ begin
     Msg := '另一处已安装 DeviceOut：' + #13#10
          + Other + #13#10
          + '类 ID 相同，继续可能看不到本次更新。仍要继续？';
-    Result := (MsgBox(Msg, mbConfirmation, MB_YESNO) = IDYES);
+    Result := (SuppressibleMsgBox(Msg, mbConfirmation, MB_YESNO, IDYES) = IDYES);
   end;
 end;
 
@@ -152,8 +152,8 @@ begin
   Result := True;
   if IsFileLocked(ExpandConstant('{app}\' + BINARY_REL)) then
   begin
-    MsgBox('插件正被宿主占用。请关闭 DAW 或解除占用 后重新卸载。本次未改动任何文件。',
-         mbError, MB_OK);
+    SuppressibleMsgBox('插件正被宿主占用。请关闭 DAW 或解除占用后重新卸载。本次未改动任何文件。',
+         mbError, MB_OK, IDOK);
     Result := False;
   end;
 end;
