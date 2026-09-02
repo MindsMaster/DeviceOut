@@ -126,9 +126,14 @@ pub fn parse_day_key(key: &str) -> Option<u64> {
     Some((days_from_civil(y, m, d) * 86_400) as u64)
 }
 
+pub fn date_prefix(epoch: u64) -> String {
+    let (y, m, d, _, _, _) = utc_parts(epoch);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 pub fn hour_prefix(epoch: u64) -> String {
-    let (y, m, d, h, _, _) = utc_parts(epoch);
-    format!("{y:04}-{m:02}-{d:02}T{h:02}")
+    let (_, _, _, h, _, _) = utc_parts(epoch);
+    format!("{}T{h:02}", date_prefix(epoch))
 }
 
 pub fn iso_ts(epoch: u64) -> String {

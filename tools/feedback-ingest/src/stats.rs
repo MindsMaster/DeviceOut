@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::store::{load_seen, pings_file, ticket_count};
-use crate::util::{day_key, hour_prefix, utc_parts};
+use crate::util::{date_prefix, hour_prefix, utc_parts};
 
 const ONLINE_WINDOW_SECS: u64 = 30 * 60;
 
@@ -38,7 +38,7 @@ pub fn compute_stats(dir: &Path, now: u64) -> DashStats {
     let prefix_of: Vec<String> = (0..24)
         .map(|i| hour_prefix(hour_start - (23 - i) as u64 * 3600))
         .collect();
-    let today_key = day_key(now);
+    let today = date_prefix(now);
     let mut os_latest: HashMap<String, String> = HashMap::new();
     for day in [now - 86_400, now] {
         let Ok(text) = std::fs::read_to_string(pings_file(dir, day)) else {
@@ -54,15 +54,15 @@ pub fn compute_stats(dir: &Path, now: u64) -> DashStats {
             ) else {
                 continue;
             };
-            if ts.len() < 13 {
+            let (Some(hour), Some(date)) = (ts.get(..13), ts.get(..10)) else {
                 continue;
-            }
-            if let Some(idx) = prefix_of.iter().position(|p| p == &ts[..13]) {
+            };
+            if let Some(idx) = prefix_of.iter().position(|p| p == hour) {
                 buckets[idx].insert(id.to_string());
                 if let Some(o) = v.get("os").and_then(|x| x.as_str()) {
                     os_latest.insert(id.to_string(), o.to_string());
                 }
-                if ts[..10] == today_key[..] {
+                if date == today {
                     today_ids.insert(id.to_string());
                 }
             }
@@ -169,6 +169,37 @@ pub fn pairs_json(v: &[(String, u32)]) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::{store_ping, PingPayload};
+
+    fn ping(id: &str) -> PingPayload {
+        PingPayload {
+            telemetry_id: id.into(),
+            version: "1.0.0".into(),
+            os: "Windows 11".into(),
+            arch: "x86_64".into(),
+            locale: "zh-CN".into(),
+            tz: "Asia/Shanghai".into(),
+        }
+    }
+
+    #[test]
+    fn today_and_trend_come_from_ping_logs() {
+        let dir = std::env::temp_dir().join(format!("fb-stats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let now = 1_787_140_800u64;
+        store_ping(&dir, &ping("a"), "1.1.1.1", now - 600).unwrap();
+        store_ping(&dir, &ping("b"), "1.1.1.1", now - 5 * 3600).unwrap();
+        store_ping(&dir, &ping("c"), "1.1.1.1", now - 20 * 3600).unwrap();
+        store_ping(&dir, &ping("d"), "1.1.1.1", now - 30 * 3600).unwrap();
+
+        let stats = compute_stats(&dir, now);
+        assert_eq!(stats.today_active, 2);
+        assert_eq!(stats.trend_values.iter().sum::<u32>(), 3);
+        assert_eq!(stats.trend_values[22], 1);
+        assert_eq!(stats.trend_values[18], 1);
+        assert_eq!(stats.trend_values[3], 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn regions_and_os() {
