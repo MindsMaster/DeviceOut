@@ -7,7 +7,7 @@ use crate::{atomic_write, paths};
 pub const OUTBOX_CAP: usize = 8;
 pub const SENT_CAP: usize = 20;
 pub const FAILED_CAP: usize = 20;
-pub const MAX_ATTEMPTS: u32 = 5;
+pub const MAX_ATTEMPTS: u32 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]

@@ -68,7 +68,7 @@ pub fn handle_post(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
         payload.diag = payload.diag.chars().take(DIAG_CAP).collect();
     }
     if ticket_count(&cfg.dir) >= cfg.max_files {
-        return text(429, "full");
+        return text(503, "full").header("Retry-After", "3600");
     }
 
     {

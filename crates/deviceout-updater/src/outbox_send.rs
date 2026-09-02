@@ -102,13 +102,15 @@ fn post_item(item: &deviceout_update::OutboxItem) -> Result<String, SendErr> {
         return Ok(ticket);
     }
     let msg = short_http_error(code, &text);
-    if code == 404 || code == 405 {
+    if is_transient(code) {
         Err(SendErr::Retry(msg))
-    } else if (400..500).contains(&code) {
-        Err(SendErr::Permanent(msg))
     } else {
-        Err(SendErr::Retry(msg))
+        Err(SendErr::Permanent(msg))
     }
+}
+
+fn is_transient(code: u16) -> bool {
+    matches!(code, 404 | 405 | 408 | 425 | 429) || !(400..500).contains(&code)
 }
 
 fn short_http_error(code: u16, body: &str) -> String {
@@ -137,4 +139,37 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limits_and_server_errors_are_retried() {
+        for code in [408, 425, 429, 500, 502, 503, 504] {
+            assert!(is_transient(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn undeployed_endpoint_is_retried() {
+        assert!(is_transient(404));
+        assert!(is_transient(405));
+    }
+
+    #[test]
+    fn client_faults_are_permanent() {
+        for code in [400, 401, 403, 413, 422] {
+            assert!(!is_transient(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn backoff_caps_at_64_minutes() {
+        assert_eq!(backoff_ms(0), 60_000);
+        assert_eq!(backoff_ms(3), 8 * 60_000);
+        assert_eq!(backoff_ms(6), 64 * 60_000);
+        assert_eq!(backoff_ms(40), 64 * 60_000);
+    }
 }
