@@ -23,6 +23,12 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
     }
 
     let bundle = PathBuf::from(&manifest.bundle_path);
+    if !deviceout_update::valid_bundle_path(&bundle)
+        || !deviceout_update::bundle_dll(&bundle).is_file()
+    {
+        let _ = std::fs::remove_dir_all(paths::pending_dir());
+        bail!("pending manifest names no installed bundle: {}", manifest.bundle_path);
+    }
     if !wait_until_unlocked(&bundle, &manifest.version)? {
         logutil::log("apply: user cancelled while locked");
         return Ok(());

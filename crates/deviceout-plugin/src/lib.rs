@@ -282,10 +282,7 @@ fn kick_updater() {
         }));
 
         if let Some(bundle) = deviceout_update::loaded_bundle_path() {
-            let s = bundle.to_string_lossy();
-            deviceout_update::spawn_updater(&[std::ffi::OsStr::new(s.as_ref())]);
-        } else {
-            deviceout_update::spawn_updater(&[]);
+            deviceout_update::spawn_updater(&[bundle.as_os_str()]);
         }
         if !deviceout_update::list_json(&deviceout_update::outbox_dir()).is_empty() {
             deviceout_update::spawn_updater(&[std::ffi::OsStr::new("--send-outbox")]);

@@ -11,7 +11,11 @@ use crate::{logutil, unix_now};
 
 const BACKOFF_SECS: i64 = 24 * 60 * 60;
 
-pub fn run(bundle: Option<&Path>, force: bool) -> Result<()> {
+pub fn run(bundle: &Path, force: bool) -> Result<()> {
+    let dll = deviceout_update::bundle_dll(bundle);
+    if !dll.is_file() {
+        bail!("bundle has no plugin binary: {}", dll.display());
+    }
     let mut state = deviceout_update::load_state();
     if !force {
         if let Some(last) = state.last_check {
@@ -59,7 +63,7 @@ pub fn run(bundle: Option<&Path>, force: bool) -> Result<()> {
         Cmp::Invalid => bail!("invalid semver latest={} current={current}", feed.version),
     }
 
-    let writable = bundle.map(deviceout_update::bundle_writable).unwrap_or(false);
+    let writable = deviceout_update::bundle_writable(bundle);
     download_pending(&feed, bundle)?;
     finish_ok(&mut state, Some(&feed.version));
     if writable {
@@ -82,14 +86,10 @@ fn finish_ok(state: &mut State, latest: Option<&str>) {
     let _ = deviceout_update::save_state(state);
 }
 
-fn current_version(bundle: Option<&Path>) -> String {
-    if let Some(bundle) = bundle {
-        let dll = deviceout_update::bundle_dll(bundle);
-        if let Some(v) = deviceout_update::file_version_string(&dll) {
-            return v;
-        }
-    }
-    env!("CARGO_PKG_VERSION").to_string()
+fn current_version(bundle: &Path) -> String {
+    let dll = deviceout_update::bundle_dll(bundle);
+    deviceout_update::file_version_string(&dll)
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
 
 enum Fetch {
@@ -128,7 +128,7 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn download_pending(feed: &Feed, bundle: Option<&Path>) -> Result<()> {
+fn download_pending(feed: &Feed, bundle: &Path) -> Result<()> {
     std::fs::create_dir_all(paths::pending_dir())?;
     let part = paths::pending_dir().join("setup.exe.part");
     let agent = crate::http::agent(Duration::from_secs(120));
@@ -149,9 +149,7 @@ fn download_pending(feed: &Feed, bundle: Option<&Path>) -> Result<()> {
     let manifest = deviceout_update::PendingManifest {
         version: feed.version.clone(),
         sha256: actual,
-        bundle_path: bundle
-            .map(|p| p.display().to_string())
-            .unwrap_or_default(),
+        bundle_path: bundle.display().to_string(),
     };
     deviceout_update::write_manifest(&manifest)?;
     Ok(())

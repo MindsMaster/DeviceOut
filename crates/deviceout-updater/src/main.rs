@@ -74,10 +74,14 @@ fn main() {
         .iter()
         .find(|a| !a.starts_with("--"))
         .map(PathBuf::from)
-        .or_else(deviceout_update::loaded_bundle_path);
+        .filter(|p| deviceout_update::valid_bundle_path(p));
+    let Some(bundle) = bundle else {
+        logutil::log("check: refused, no valid bundle path argument");
+        return;
+    };
 
     let force = check_now || std::env::var_os("DEVICEOUT_FORCE_CHECK").is_some();
-    if let Err(e) = check::run(bundle.as_deref(), force) {
+    if let Err(e) = check::run(&bundle, force) {
         logutil::log(&format!("check: {e:#}"));
         let mut state = deviceout_update::load_state();
         state.last_error = Some(e.to_string());

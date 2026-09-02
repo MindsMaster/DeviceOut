@@ -75,11 +75,29 @@ pub fn file_version_string(path: &Path) -> Option<String> {
     Some(format!("{maj}.{min}.{pat}"))
 }
 
+fn name_is(path: &Path, expected: &str) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case(expected))
+}
+
+pub fn valid_bundle_path(bundle: &Path) -> bool {
+    bundle.is_absolute()
+        && bundle
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("vst3"))
+        && bundle.parent().is_some()
+}
+
 fn bundle_from_dll(dll: &Path) -> Option<PathBuf> {
-    let win = dll.parent()?;
-    let contents = win.parent()?;
+    if !name_is(dll, crate::BUNDLE_NAME) {
+        return None;
+    }
+    let win = dll.parent().filter(|p| name_is(p, "x86_64-win"))?;
+    let contents = win.parent().filter(|p| name_is(p, "Contents"))?;
     let bundle = contents.parent()?;
-    Some(bundle.to_path_buf())
+    valid_bundle_path(bundle).then(|| bundle.to_path_buf())
 }
 
 #[cfg(windows)]
@@ -177,5 +195,40 @@ mod tests {
         assert_eq!(cmp_latest("0.1.0", "0.1.0"), Cmp::EqualOrOlder);
         assert_eq!(cmp_latest("0.1.0", "0.1.1"), Cmp::EqualOrOlder);
         assert_eq!(cmp_latest("0.1.1", "0.1.0"), Cmp::Newer);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bundle_is_derived_only_from_a_real_bundle_layout() {
+        let dll = Path::new(
+            r"C:\Users\me\AppData\Local\Programs\Common\VST3\DeviceOut.vst3\Contents\x86_64-win\DeviceOut.vst3",
+        );
+        assert_eq!(
+            bundle_from_dll(dll),
+            Some(PathBuf::from(
+                r"C:\Users\me\AppData\Local\Programs\Common\VST3\DeviceOut.vst3"
+            ))
+        );
+        assert_eq!(
+            bundle_from_dll(Path::new(r"C:\Users\me\AppData\Local\DeviceOut\deviceout-updater.exe")),
+            None
+        );
+        assert_eq!(
+            bundle_from_dll(Path::new(r"C:\a\b\c\DeviceOut.vst3")),
+            None
+        );
+        assert_eq!(
+            bundle_from_dll(Path::new(r"C:\x.vst3\Contents\x86_64-win\Other.vst3")),
+            None
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bundle_paths_must_be_absolute_vst3_dirs() {
+        assert!(valid_bundle_path(Path::new(r"C:\Program Files\Common Files\VST3\DeviceOut.vst3")));
+        assert!(!valid_bundle_path(Path::new(r"C:\Users\me\AppData")));
+        assert!(!valid_bundle_path(Path::new("")));
+        assert!(!valid_bundle_path(Path::new(r"DeviceOut.vst3")));
     }
 }

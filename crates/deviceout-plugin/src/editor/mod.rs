@@ -607,11 +607,8 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
 }
 
 fn spawn_check_now(bundle: Option<&PathBuf>) {
-    match bundle {
-        Some(path) => {
-            deviceout_update::spawn_updater(&[path.as_os_str(), OsStr::new("--check-now")])
-        }
-        None => deviceout_update::spawn_updater(&[OsStr::new("--check-now")]),
+    if let Some(path) = bundle {
+        deviceout_update::spawn_updater(&[path.as_os_str(), OsStr::new("--check-now")]);
     }
 }
 
