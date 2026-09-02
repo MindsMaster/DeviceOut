@@ -44,10 +44,6 @@ pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
 }
 
 pub fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        let _ = std::fs::remove_file(to);
-    }
     std::fs::rename(from, to)
 }
 
@@ -129,6 +125,21 @@ mod tests {
         atomic_write(&path, b"one").unwrap();
         atomic_write(&path, b"two").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"two");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_write_replaces_while_a_reader_holds_the_file_open() {
+        let dir = std::env::temp_dir().join(format!("deviceout-atomic-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        atomic_write(&path, b"one").unwrap();
+        let reader = std::fs::File::open(&path).unwrap();
+        atomic_write(&path, b"two").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"two");
+        assert!(!path.with_extension("tmp").exists());
+        drop(reader);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
