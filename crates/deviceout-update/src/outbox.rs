@@ -155,13 +155,17 @@ fn now_ms() -> u64 {
 }
 
 pub(crate) fn random_id() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(now_ms().to_le_bytes());
-    if let Ok(exe) = std::env::current_exe() {
-        h.update(exe.to_string_lossy().as_bytes());
+    for salt in 0u64..4 {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(salt);
+        h.update(hasher.finish().to_le_bytes());
     }
-    h.update(format!("{:?}", std::thread::current().id()).as_bytes());
     let bytes = h.finalize();
     crate::to_hex(&bytes[..16])
 }
