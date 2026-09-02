@@ -6,8 +6,6 @@ use crate::paths;
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct UiJson {
     #[serde(default)]
-    pub last_notified_version: Option<String>,
-    #[serde(default)]
     pub telemetry_enabled: bool,
     #[serde(default)]
     pub telemetry_set: bool,
@@ -34,9 +32,6 @@ pub fn save_ui_json(ui: &UiJson) -> std::io::Result<()> {
         let mut merged: UiJson = existing
             .and_then(|b| serde_json::from_slice(b).ok())
             .unwrap_or_default();
-        if ui.last_notified_version.is_some() {
-            merged.last_notified_version = ui.last_notified_version.clone();
-        }
         if ui.telemetry_set {
             merged.telemetry_enabled = ui.telemetry_enabled;
             merged.telemetry_set = true;

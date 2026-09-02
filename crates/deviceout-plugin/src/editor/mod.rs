@@ -26,6 +26,8 @@ mod win_prompt;
 type SharedMetrics = Arc<RwLock<Option<Arc<EngineMetrics>>>>;
 type SharedDevices = Arc<RwLock<Vec<DeviceInfo>>>;
 
+const INSTALL_BUTTON_COOLDOWN: Duration = Duration::from_secs(30);
+
 const REPO_URL: &str = "https://github.com/MindsMaster/DeviceOut";
 const AUTHOR_EMAIL: &str = "an5w1r@163.com";
 const QQ_GROUP: &str = "1046048297";
@@ -46,8 +48,7 @@ struct PromptWait {
 }
 
 struct EditorUi {
-    launched_installer: bool,
-    last_notified_version: Option<String>,
+    install_started: Option<Instant>,
     check_busy_since: Option<Instant>,
     check_mark_attempt: Option<i64>,
     prompt_wait: Option<PromptWait>,
@@ -61,8 +62,7 @@ struct EditorUi {
 impl Default for EditorUi {
     fn default() -> Self {
         Self {
-            launched_installer: false,
-            last_notified_version: None,
+            install_started: None,
             check_busy_since: None,
             check_mark_attempt: None,
             prompt_wait: None,
@@ -538,19 +538,12 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
     let pending = deviceout_update::pending_ready();
     let st = deviceout_update::load_state();
     poll_check_busy(state, pending.is_some(), &st);
-
-    if pending.is_some() && !state.launched_installer {
-        state.launched_installer = true;
-        deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
-    }
-
-    if let Some(pending) = pending.as_ref() {
-        if state.last_notified_version.as_deref() != Some(pending.version.as_str()) {
-            let mut ui_json = deviceout_update::load_ui_json();
-            ui_json.last_notified_version = Some(pending.version.clone());
-            let _ = deviceout_update::save_ui_json(&ui_json);
-            state.last_notified_version = Some(pending.version.clone());
-        }
+    if pending.is_none()
+        || state
+            .install_started
+            .is_some_and(|t| t.elapsed() >= INSTALL_BUTTON_COOLDOWN)
+    {
+        state.install_started = None;
     }
 
     let (status, color, tip) = update_status_text(
@@ -573,10 +566,13 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if pending.is_some()
-                && widgets::primary_button(ui, i18n::pick("安装", "Install")).clicked()
-            {
-                deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
+            if pending.is_some() {
+                ui.add_enabled_ui(state.install_started.is_none(), |ui| {
+                    if widgets::primary_button(ui, i18n::pick("安装", "Install")).clicked() {
+                        state.install_started = Some(Instant::now());
+                        deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
+                    }
+                });
             }
             let checking = state.check_busy_since.is_some();
             ui.add_enabled_ui(!checking, |ui| {
@@ -651,7 +647,13 @@ fn update_status_text(
         return (
             text,
             theme::AMBER,
-            Some(i18n::pick("关闭宿主后完成安装", "Close the host to finish installing").into()),
+            Some(
+                i18n::pick(
+                    "点击安装，随后按提示关闭宿主",
+                    "Click Install, then close the host when prompted",
+                )
+                .into(),
+            ),
         );
     }
     if let Some(err) = st.last_error.as_deref() {
