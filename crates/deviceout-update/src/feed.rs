@@ -9,9 +9,10 @@ pub struct Feed {
 
 pub fn parse_feed(bytes: &[u8]) -> Result<Feed, String> {
     let mut feed: Feed = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    if feed.version.trim().is_empty() {
-        return Err("missing version".into());
-    }
+    let Some(version) = crate::version::release_version(&feed.version) else {
+        return Err(format!("version must be plain major.minor.patch, got {:?}", feed.version));
+    };
+    feed.version = version.to_string();
     feed.sha256 = feed.sha256.trim().to_ascii_lowercase();
     if feed.sha256.len() != 64 || !feed.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("sha256 must be 64 hex chars".into());
@@ -38,5 +39,27 @@ mod tests {
     fn rejects_http_url() {
         let json = br#"{"version":"0.1.1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","url":"http://example.com/x.exe"}"#;
         assert!(parse_feed(json).is_err());
+    }
+
+    #[test]
+    fn rejects_prerelease_build_and_malformed_hashes() {
+        let sha = "a".repeat(64);
+        for version in ["1.0.0-rc.1", "1.0.0+build", "1.0", "", "abc"] {
+            let json = format!(
+                r#"{{"version":"{version}","sha256":"{sha}","url":"https://example.com/x.exe"}}"#
+            );
+            assert!(parse_feed(json.as_bytes()).is_err(), "{version}");
+        }
+        for sha in ["a".repeat(63), "g".repeat(64)] {
+            let json = format!(
+                r#"{{"version":"1.0.0","sha256":"{sha}","url":"https://example.com/x.exe"}}"#
+            );
+            assert!(parse_feed(json.as_bytes()).is_err());
+        }
+        let upper = format!(
+            r#"{{"version":"1.0.0","sha256":"{}","url":"https://example.com/x.exe"}}"#,
+            "A".repeat(64)
+        );
+        assert_eq!(parse_feed(upper.as_bytes()).unwrap().sha256, "a".repeat(64));
     }
 }

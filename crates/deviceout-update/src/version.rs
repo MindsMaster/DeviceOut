@@ -7,14 +7,16 @@ pub enum Cmp {
     Invalid,
 }
 
+pub fn release_version(s: &str) -> Option<semver::Version> {
+    let v = semver::Version::parse(s.trim()).ok()?;
+    (v.pre.is_empty() && v.build.is_empty()).then_some(v)
+}
+
 pub fn cmp_latest(latest: &str, current: &str) -> Cmp {
-    let Ok(latest) = semver::Version::parse(latest) else {
+    let (Some(latest), Some(current)) = (release_version(latest), release_version(current)) else {
         return Cmp::Invalid;
     };
-    let Ok(current) = semver::Version::parse(current) else {
-        return Cmp::Invalid;
-    };
-    if latest > current {
+    if latest.cmp_precedence(&current) == std::cmp::Ordering::Greater {
         Cmp::Newer
     } else {
         Cmp::EqualOrOlder
@@ -195,6 +197,17 @@ mod tests {
         assert_eq!(cmp_latest("0.1.0", "0.1.0"), Cmp::EqualOrOlder);
         assert_eq!(cmp_latest("0.1.0", "0.1.1"), Cmp::EqualOrOlder);
         assert_eq!(cmp_latest("0.1.1", "0.1.0"), Cmp::Newer);
+        assert_eq!(cmp_latest("1.0.0", "0.9.9"), Cmp::Newer);
+    }
+
+    #[test]
+    fn only_plain_release_versions_are_accepted() {
+        assert_eq!(cmp_latest("1.0.0+hotfix", "1.0.0"), Cmp::Invalid);
+        assert_eq!(cmp_latest("1.1.0-rc.1", "1.0.0"), Cmp::Invalid);
+        assert_eq!(cmp_latest("1.0.0", "1.0.0-beta"), Cmp::Invalid);
+        assert_eq!(cmp_latest("1.0.0.0", "1.0.0"), Cmp::Invalid);
+        assert_eq!(cmp_latest("v1.0.0", "1.0.0"), Cmp::Invalid);
+        assert!(release_version(" 1.2.3 ").is_some());
     }
 
     #[cfg(windows)]

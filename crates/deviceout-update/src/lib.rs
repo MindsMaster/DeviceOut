@@ -31,7 +31,7 @@ pub use state::{load_state, save_state, State};
 pub use ui_json::{load_ui_json, save_ui_json, UiJson};
 pub use version::{
     bundle_dll_locked, bundle_writable, cmp_latest, file_version_string, loaded_bundle_path,
-    scope_label, valid_bundle_path, Cmp,
+    release_version, scope_label, valid_bundle_path, Cmp,
 };
 
 pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {

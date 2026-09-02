@@ -55,6 +55,9 @@ pub fn package(args: &[String]) -> Result<()> {
     nih_plug_xtask::chdir_workspace_root()?;
 
     let version = env!("CARGO_PKG_VERSION");
+    if deviceout_update::release_version(version).is_none() {
+        bail!("版本号必须是纯 major.minor.patch，当前为 {version}");
+    }
     let skip_build = args.iter().any(|a| a == "--no-build");
     let upload = args.iter().any(|a| a == "--upload");
 
@@ -154,12 +157,13 @@ fn write_feed(setup: &Path, version: &str) -> Result<(PathBuf, PathBuf)> {
     let url = format!(
         "https://repo.azuramc.cc/repository/raw-public/deviceout/{file_name}"
     );
-    let feed = serde_json::json!({
-        "version": version,
-        "sha256": sha,
-        "url": url,
-    });
+    let feed = deviceout_update::Feed {
+        version: version.to_string(),
+        sha256: sha,
+        url,
+    };
     let bytes = serde_json::to_vec_pretty(&feed)?;
+    deviceout_update::parse_feed(&bytes).map_err(|e| anyhow::anyhow!(e))?;
     let key = load_sign_key()?;
     let sig = deviceout_update::sign(&key, &bytes);
 
