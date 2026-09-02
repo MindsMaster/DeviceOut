@@ -21,6 +21,7 @@ mod win_prompt;
 type SharedDevices = Arc<RwLock<Vec<DeviceInfo>>>;
 
 const INSTALL_BUTTON_COOLDOWN: Duration = Duration::from_secs(30);
+const UPDATE_VIEW_INTERVAL: Duration = Duration::from_secs(1);
 
 const REPO_URL: &str = "https://github.com/MindsMaster/DeviceOut";
 const AUTHOR_EMAIL: &str = "an5w1r@163.com";
@@ -54,6 +55,7 @@ impl Drop for PromptWait {
 }
 
 struct EditorUi {
+    update_view: Option<UpdateView>,
     install_started: Option<Instant>,
     check_busy_since: Option<Instant>,
     check_mark_attempt: Option<i64>,
@@ -68,6 +70,7 @@ struct EditorUi {
 impl Default for EditorUi {
     fn default() -> Self {
         Self {
+            update_view: None,
             install_started: None,
             check_busy_since: None,
             check_mark_attempt: None,
@@ -218,7 +221,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that(REPO_URL);
+                let _ = open::that_detached(REPO_URL);
             }
             if widgets::icon_button(
                 ui,
@@ -227,7 +230,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that(QQ_GROUP_URL);
+                let _ = open::that_detached(QQ_GROUP_URL);
             }
             if widgets::icon_button(
                 ui,
@@ -236,7 +239,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that(format!("mailto:{AUTHOR_EMAIL}"));
+                let _ = open::that_detached(format!("mailto:{AUTHOR_EMAIL}"));
             }
 
             let label = match i18n::lang() {
@@ -534,10 +537,39 @@ fn footer_card(
     });
 }
 
+struct UpdateView {
+    pending: Option<deviceout_update::PendingManifest>,
+    state: deviceout_update::State,
+    read_at: Instant,
+}
+
+impl UpdateView {
+    fn read() -> Self {
+        Self {
+            pending: deviceout_update::pending_ready(),
+            state: deviceout_update::load_state(),
+            read_at: Instant::now(),
+        }
+    }
+}
+
+fn refresh_update_view(state: &mut EditorUi) {
+    let stale = state
+        .update_view
+        .as_ref()
+        .is_none_or(|v| v.read_at.elapsed() >= UPDATE_VIEW_INTERVAL);
+    if stale {
+        state.update_view = Some(UpdateView::read());
+    }
+}
+
 fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>) {
     let current = env!("CARGO_PKG_VERSION");
-    let pending = deviceout_update::pending_ready();
-    let st = deviceout_update::load_state();
+    refresh_update_view(state);
+    let view = state.update_view.take().expect("refreshed above");
+    let pending = view.pending.clone();
+    let st = view.state.clone();
+    state.update_view = Some(view);
     poll_check_busy(state, pending.is_some(), &st);
     if pending.is_none()
         || state
@@ -571,6 +603,7 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
                 ui.add_enabled_ui(state.install_started.is_none(), |ui| {
                     if widgets::primary_button(ui, i18n::pick("安装", "Install")).clicked() {
                         state.install_started = Some(Instant::now());
+                        state.update_view = None;
                         deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
                     }
                 });
@@ -596,6 +629,7 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
                 {
                     state.check_mark_attempt = st.last_attempt;
                     state.check_busy_since = Some(Instant::now());
+                    state.update_view = None;
                     spawn_check_now(bundle);
                 }
             });

@@ -22,7 +22,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 egui-baseview = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "ec70c3fe6b2f070dcacbc22924431edbe24bd1c0", features = ["windows_keyboard_workaround"] }
 egui_extras = { version = "0.31.1", features = ["svg"] }
-open = "5"
+open = { version = "5", features = ["shellexecute-on-windows"] }
 parking_lot = "0.12"
 
 [target.'cfg(windows)'.dependencies]
