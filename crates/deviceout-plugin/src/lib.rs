@@ -6,7 +6,7 @@ use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use parking_lot::RwLock;
 
-use deviceout_engine::{EngineConfig, EngineState};
+use deviceout_engine::{EngineConfig, EngineState, Fault};
 use deviceout_sink::wasapi::{list_output_devices, ComGuard};
 use deviceout_sink::DeviceInfo;
 
@@ -216,7 +216,7 @@ fn kick_updater() {
 
 pub(crate) struct UiState {
     pub state: EngineState,
-    pub error: Option<String>,
+    pub error: Option<Fault>,
     pub fill_fraction: f64,
     pub capacity_frames: u64,
     pub drift_ppm: Option<f64>,

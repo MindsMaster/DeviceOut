@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use deviceout_core::BridgeStats;
 
+use crate::error::Fault;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineState {
     Priming,
@@ -30,18 +32,6 @@ impl EngineState {
             2 => Self::Stopped,
             4 => Self::Reconnecting,
             _ => Self::Failed,
-        }
-    }
-}
-
-impl std::fmt::Display for EngineState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Priming => write!(f, "预填充"),
-            Self::Running => write!(f, "运行中"),
-            Self::Stopped => write!(f, "已停止"),
-            Self::Failed => write!(f, "出错"),
-            Self::Reconnecting => write!(f, "重连中"),
         }
     }
 }
@@ -78,7 +68,7 @@ pub struct EngineMetrics {
     reconnects: AtomicU64,
     frames_discarded: AtomicU64,
 
-    last_error: Mutex<Option<String>>,
+    last_error: Mutex<Option<Fault>>,
 }
 
 pub fn latency_ms(
@@ -139,9 +129,9 @@ impl EngineMetrics {
         self.state.store(state.code(), Ordering::Relaxed);
     }
 
-    pub(crate) fn set_reconnecting(&self, message: String) {
+    pub(crate) fn set_reconnecting(&self, fault: Fault) {
         if let Ok(mut slot) = self.last_error.lock() {
-            *slot = Some(message);
+            *slot = Some(fault);
         }
         self.set_state(EngineState::Reconnecting);
     }
@@ -155,9 +145,9 @@ impl EngineMetrics {
             .fetch_add(frames as u64, Ordering::Relaxed);
     }
 
-    pub(crate) fn set_failed(&self, message: String) {
+    pub(crate) fn set_failed(&self, fault: Fault) {
         if let Ok(mut slot) = self.last_error.lock() {
-            *slot = Some(message);
+            *slot = Some(fault);
         }
         self.set_state(EngineState::Failed);
     }
@@ -221,7 +211,7 @@ impl EngineMetrics {
         EngineState::from_code(self.state.load(Ordering::Relaxed))
     }
 
-    pub fn last_error(&self) -> Option<String> {
+    pub fn last_error(&self) -> Option<Fault> {
         self.last_error.lock().ok().and_then(|slot| slot.clone())
     }
 
@@ -334,11 +324,19 @@ mod tests {
         EngineMetrics::new(Arc::new(BridgeStats::default()))
     }
 
+    fn lost(detail: &str) -> Fault {
+        Fault {
+            kind: crate::FaultKind::DeviceLost,
+            detail: detail.into(),
+            attempt: 0,
+        }
+    }
+
     #[test]
     fn recovering_clears_the_stale_error() {
         let m = metrics();
 
-        m.set_reconnecting("设备已失效：被拔出".into());
+        m.set_reconnecting(lost("设备已失效：被拔出"));
         assert_eq!(m.state(), EngineState::Reconnecting);
         assert!(m.last_error().is_some());
 
@@ -355,7 +353,7 @@ mod tests {
     fn reconnect_count_survives_recovery() {
         let m = metrics();
 
-        m.set_reconnecting("设备失效".into());
+        m.set_reconnecting(lost("设备失效"));
         m.record_reconnect();
         m.record_discard(1234);
         m.set_running();
@@ -385,9 +383,21 @@ mod tests {
     #[test]
     fn failure_keeps_its_reason() {
         let m = metrics();
-        m.set_failed("声道数不一致".into());
+        let fault = crate::EngineError::ChannelMismatch {
+            device: 8,
+            source: 2,
+        }
+        .fault();
+        m.set_failed(fault.clone());
 
         assert_eq!(m.state(), EngineState::Failed);
-        assert_eq!(m.last_error().as_deref(), Some("声道数不一致"));
+        assert_eq!(m.last_error(), Some(fault));
+        assert_eq!(
+            m.last_error().unwrap().kind,
+            crate::FaultKind::ChannelMismatch {
+                device: 8,
+                source: 2
+            }
+        );
     }
 }

@@ -2,7 +2,7 @@ pub mod error;
 pub mod metrics;
 pub mod worker;
 
-pub use error::EngineError;
+pub use error::{EngineError, Fault, FaultKind};
 pub use metrics::{latency_ms, EngineMetrics, EngineState};
 #[cfg(windows)]
 pub use worker::start;

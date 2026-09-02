@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use deviceout_core::ring;
-use deviceout_engine::{start_with, EngineConfig, EngineHandle, EngineState};
+use deviceout_engine::{start_with, EngineConfig, EngineHandle, EngineState, FaultKind};
 use deviceout_sink::{AudioSink, SampleFormat, SinkError, StreamFormat, WriteReport};
 
 const RATE: u32 = 48_000;
@@ -190,7 +190,9 @@ fn a_non_recoverable_stream_error_fails_and_returns_the_consumer() {
     assert!(wait_for(&handle, Duration::from_secs(2), |h| {
         h.metrics().state() == EngineState::Failed
     }));
-    assert!(handle.metrics().last_error().unwrap().contains("bad"));
+    let fault = handle.metrics().last_error().unwrap();
+    assert_eq!(fault.kind, FaultKind::Stream);
+    assert!(fault.detail.contains("bad"), "{}", fault.detail);
     let consumer = handle.stop().expect("consumer must come back");
     assert_eq!(consumer.capacity_frames(), CAPACITY);
 }
@@ -203,7 +205,13 @@ fn a_channel_mismatch_at_open_fails_without_streaming() {
     let mut handle = start_with(rx, config(), h.opener(1, |_| Ok(None)));
 
     assert_eq!(handle.metrics().state(), EngineState::Failed);
-    assert!(handle.metrics().last_error().unwrap().contains("声道"));
+    assert_eq!(
+        handle.metrics().last_error().unwrap().kind,
+        FaultKind::ChannelMismatch {
+            device: 1,
+            source: 2
+        }
+    );
     assert_eq!(written.load(Ordering::SeqCst), 0);
     assert!(handle.stop().is_some());
 }
@@ -219,6 +227,10 @@ fn an_open_failure_before_any_success_is_final() {
     );
 
     assert_eq!(handle.metrics().state(), EngineState::Failed);
+    assert_eq!(
+        handle.metrics().last_error().unwrap().kind,
+        FaultKind::DeviceNotFound
+    );
     assert!(handle.stop().is_some());
 }
 

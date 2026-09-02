@@ -7,6 +7,7 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::{Mutex, RwLock};
 
+use deviceout_engine::{Fault, FaultKind};
 use deviceout_sink::DeviceInfo;
 use deviceout_update::outbox::FeedbackKind;
 
@@ -331,11 +332,57 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
             }
         });
 
-        if let Some(error) = snap.and_then(|s| s.error.as_ref()) {
+        if let Some(fault) = snap.and_then(|s| s.error.as_ref()) {
             ui.add_space(6.0);
-            widgets::alert_line(ui, theme::RED, error.clone());
+            let line = widgets::alert_line(ui, theme::RED, fault_text(fault));
+            line.on_hover_text(&fault.detail);
         }
     });
+}
+
+fn fault_text(fault: &Fault) -> String {
+    let base = match fault.kind {
+        FaultKind::DeviceNotFound => i18n::pick(
+            "找不到所选输出设备，请重新选择或点击刷新",
+            "The selected output device was not found; pick another or refresh",
+        )
+        .to_string(),
+        FaultKind::DeviceLost => i18n::pick(
+            "输出设备已断开，正在等待它回来",
+            "The output device went away; waiting for it to return",
+        )
+        .to_string(),
+        FaultKind::ChannelMismatch { device, source } => match i18n::lang() {
+            i18n::Lang::Zh => format!("设备是 {device} 声道，宿主是 {source} 声道，请选一台立体声设备"),
+            i18n::Lang::En => {
+                format!("Device has {device} channels, the host has {source}; pick a stereo device")
+            }
+        },
+        FaultKind::UnsupportedFormat => i18n::pick(
+            "设备的混音格式无法输出",
+            "The device's mix format cannot be written",
+        )
+        .to_string(),
+        FaultKind::ComInit | FaultKind::Enumeration => i18n::pick(
+            "无法访问 Windows 音频系统",
+            "Could not reach the Windows audio system",
+        )
+        .to_string(),
+        FaultKind::StreamInit => i18n::pick("无法打开音频流", "Could not open the audio stream").to_string(),
+        FaultKind::Stream => i18n::pick("音频流出错", "The audio stream failed").to_string(),
+        FaultKind::Resample => i18n::pick("重采样出错", "Resampling failed").to_string(),
+        FaultKind::Config | FaultKind::Thread => {
+            i18n::pick("引擎无法启动", "The engine could not start").to_string()
+        }
+    };
+    if fault.attempt > 0 {
+        match i18n::lang() {
+            i18n::Lang::Zh => format!("{base}（第 {} 次重试）", fault.attempt),
+            i18n::Lang::En => format!("{base} (retry {})", fault.attempt),
+        }
+    } else {
+        base
+    }
 }
 
 fn fill_card(ui: &mut egui::Ui, s: &UiState) {

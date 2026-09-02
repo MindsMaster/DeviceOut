@@ -27,7 +27,7 @@ fn a_missing_device_fails_visibly_instead_of_silently() {
 
     assert_eq!(handle.metrics().state(), EngineState::Failed);
     let reason = handle.metrics().last_error().expect("失败但未记录原因");
-    assert!(!reason.is_empty());
+    assert!(!reason.detail.is_empty());
 }
 
 #[test]
@@ -61,7 +61,8 @@ fn a_channel_count_mismatch_is_caught_before_touching_the_device() {
     let mut handle = start(rx, config());
 
     assert_eq!(handle.metrics().state(), EngineState::Failed);
-    let reason = handle.metrics().last_error().unwrap_or_default();
-    assert!(reason.contains("声道"), "错误信息没提声道数: {reason}");
+    let reason = handle.metrics().last_error().expect("失败但未记录原因");
+    assert_eq!(reason.kind, deviceout_engine::FaultKind::Config);
+    assert!(reason.detail.contains("声道"), "错误信息没提声道数: {}", reason.detail);
     assert!(handle.stop().is_some());
 }

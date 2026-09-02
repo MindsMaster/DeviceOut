@@ -328,12 +328,13 @@ fn refresh_icon(painter: &egui::Painter, center: Pos2, radius: f32, color: Color
     }
 }
 
-pub(crate) fn alert_line(ui: &mut egui::Ui, color: Color32, text: String) {
+pub(crate) fn alert_line(ui: &mut egui::Ui, color: Color32, text: String) -> Response {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 14.0), Sense::hover());
         ui.painter().circle_filled(rect.center(), 2.5, color);
-        ui.label(RichText::new(text).size(11.5).color(theme::TEXT_DIM));
-    });
+        ui.label(RichText::new(text).size(11.5).color(theme::TEXT_DIM))
+    })
+    .inner
 }
 
 pub(crate) fn icon_button(

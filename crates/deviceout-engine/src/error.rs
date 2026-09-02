@@ -18,6 +18,78 @@ impl EngineError {
             _ => false,
         }
     }
+
+    pub fn fault(&self) -> Fault {
+        let kind = match self {
+            Self::Config(_) => FaultKind::Config,
+            Self::ChannelMismatch { device, source } => FaultKind::ChannelMismatch {
+                device: *device,
+                source: *source,
+            },
+            Self::Resample(_) => FaultKind::Resample,
+            Self::Sink(e) => match e {
+                SinkError::ComInit(_) => FaultKind::ComInit,
+                SinkError::DeviceNotFound(_) => FaultKind::DeviceNotFound,
+                SinkError::Enumeration(_) => FaultKind::Enumeration,
+                SinkError::UnsupportedFormat { .. } => FaultKind::UnsupportedFormat,
+                SinkError::StreamInit(_) => FaultKind::StreamInit,
+                SinkError::Stream(_) | SinkError::MisalignedBuffer { .. } => FaultKind::Stream,
+                SinkError::DeviceLost(_) => FaultKind::DeviceLost,
+            },
+        };
+        Fault {
+            kind,
+            detail: self.to_string(),
+            attempt: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultKind {
+    Config,
+    ChannelMismatch { device: usize, source: usize },
+    Resample,
+    ComInit,
+    DeviceNotFound,
+    Enumeration,
+    UnsupportedFormat,
+    StreamInit,
+    Stream,
+    DeviceLost,
+    Thread,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fault {
+    pub kind: FaultKind,
+    pub detail: String,
+    pub attempt: u32,
+}
+
+impl Fault {
+    pub fn thread(detail: String) -> Self {
+        Self {
+            kind: FaultKind::Thread,
+            detail,
+            attempt: 0,
+        }
+    }
+
+    pub fn with_attempt(mut self, attempt: u32) -> Self {
+        self.attempt = attempt;
+        self
+    }
+}
+
+impl fmt::Display for Fault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.attempt > 0 {
+            write!(f, "{}（第 {} 次）", self.detail, self.attempt)
+        } else {
+            f.write_str(&self.detail)
+        }
+    }
 }
 
 impl fmt::Display for EngineError {

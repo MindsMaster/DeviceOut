@@ -124,7 +124,10 @@ fn main() {
             eprintln!(
                 "链路在 {:.0} 秒处出错: {}",
                 elapsed.as_secs_f64(),
-                metrics.last_error().unwrap_or_else(|| "原因未记录".into())
+                metrics
+                    .last_error()
+                    .map(|f| f.to_string())
+                    .unwrap_or_else(|| "原因未记录".into())
             );
             failed = true;
             break;
@@ -170,7 +173,7 @@ fn main() {
             println!(
                 "{:>6.0}s  {:>6}  {:>7.0}  {:>5.1}%  {:>9}  {:>11}  {:>5}  {:>5}  {:>6}",
                 elapsed.as_secs_f64(),
-                state.to_string(),
+                format!("{state:?}"),
                 metrics.smoothed_fill(),
                 metrics.fill_fraction() * 100.0,
                 ppm,

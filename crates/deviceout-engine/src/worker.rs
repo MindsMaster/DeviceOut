@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use deviceout_core::{DriftController, DriftResampler, DriftTuning, RingConsumer};
 use deviceout_sink::{AudioSink, SinkError, StreamFormat};
 
-use crate::error::EngineError;
+use crate::error::{EngineError, Fault};
 use crate::metrics::{EngineMetrics, EngineState};
 
 #[derive(Debug, Clone)]
@@ -89,7 +89,7 @@ pub fn start_with<O: OpenSink>(consumer: RingConsumer, config: EngineConfig, ope
     let stop = Arc::new(AtomicBool::new(false));
 
     if let Err(e) = validate(&consumer, &config) {
-        metrics.set_failed(e.to_string());
+        metrics.set_failed(e.fault());
         return EngineHandle {
             metrics,
             stop,
@@ -117,7 +117,7 @@ pub fn start_with<O: OpenSink>(consumer: RingConsumer, config: EngineConfig, ope
             }
         }
         Err(e) => {
-            metrics.set_failed(format!("无法创建输出线程: {e}"));
+            metrics.set_failed(Fault::thread(format!("无法创建输出线程: {e}")));
             EngineHandle {
                 metrics,
                 stop,
@@ -207,11 +207,11 @@ fn run<O: OpenSink>(
                         return rx;
                     }
                     Err(e) if e.is_recoverable() => {
-                        metrics.set_reconnecting(e.to_string());
+                        metrics.set_reconnecting(e.fault());
                         saw_device_loss = true;
                     }
                     Err(e) => {
-                        metrics.set_failed(e.to_string());
+                        metrics.set_failed(e.fault());
                         return rx;
                     }
                 }
@@ -219,11 +219,11 @@ fn run<O: OpenSink>(
 
             Err(e) if saw_device_loss && e.is_recoverable() => {
                 attempt = attempt.saturating_add(1);
-                metrics.set_reconnecting(format!("{e}（第 {attempt} 次）"));
+                metrics.set_reconnecting(e.fault().with_attempt(attempt));
             }
 
             Err(e) => {
-                metrics.set_failed(e.to_string());
+                metrics.set_failed(e.fault());
                 signal_ready(&mut ready);
                 return rx;
             }
