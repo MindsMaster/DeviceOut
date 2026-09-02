@@ -11,7 +11,7 @@ use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use crate::device::{SampleFormat, StreamFormat};
 use crate::error::SinkError;
 use crate::wasapi::{find_device_by_id, parse_format, ComGuard};
-use crate::AudioSink;
+use crate::{AudioSink, WriteReport};
 
 const WAIT_TIMEOUT_MS: u32 = 2000;
 
@@ -42,7 +42,6 @@ pub struct WasapiSink {
     format: StreamFormat,
     buffer_frames: u32,
     period_frames: usize,
-    stream_latency_ms: Option<f64>,
     running: bool,
     _com: ComGuard,
 }
@@ -98,8 +97,6 @@ impl WasapiSink {
                 .GetService()
                 .map_err(|e| SinkError::init_from_hresult("获取渲染服务失败", e))?;
 
-            let stream_latency_ms = stream_latency_ms(&client);
-
             Ok(Self {
                 render,
                 client,
@@ -107,46 +104,15 @@ impl WasapiSink {
                 format,
                 buffer_frames,
                 period_frames: period_frames.max(1),
-                stream_latency_ms,
                 running: false,
                 _com: com,
             })
         }
     }
 
-    pub fn buffer_frames(&self) -> u32 {
-        self.buffer_frames
-    }
-
-    pub fn stream_latency_ms(&self) -> Option<f64> {
-        self.stream_latency_ms
-    }
-
-    pub fn prefill_silence(&mut self) -> Result<usize, SinkError> {
-        unsafe {
-            let padding = self
-                .client
-                .GetCurrentPadding()
-                .map_err(|e| SinkError::from_hresult("查询缓冲余量失败", e))?;
-
-            let free = self.buffer_frames.saturating_sub(padding);
-            if free == 0 {
-                return Ok(0);
-            }
-
-            let dst = self
-                .render
-                .GetBuffer(free)
-                .map_err(|e| SinkError::from_hresult("获取设备缓冲失败", e))?;
-
-            ptr::write_bytes(dst, 0, free as usize * self.format.frame_bytes());
-
-            self.render
-                .ReleaseBuffer(free, 0)
-                .map_err(|e| SinkError::from_hresult("提交设备缓冲失败", e))?;
-
-            Ok(free as usize)
-        }
+    fn padding(&self) -> Result<u32, SinkError> {
+        unsafe { self.client.GetCurrentPadding() }
+            .map_err(|e| SinkError::from_hresult("查询缓冲余量失败", e))
     }
 
     fn wait_for_device(&self) -> Result<(), SinkError> {
@@ -170,6 +136,28 @@ impl AudioSink for WasapiSink {
         self.period_frames
     }
 
+    fn buffer_frames(&self) -> usize {
+        self.buffer_frames as usize
+    }
+
+    fn prefill_silence(&mut self) -> Result<usize, SinkError> {
+        let free = self.buffer_frames.saturating_sub(self.padding()?);
+        if free == 0 {
+            return Ok(0);
+        }
+        unsafe {
+            let dst = self
+                .render
+                .GetBuffer(free)
+                .map_err(|e| SinkError::from_hresult("获取设备缓冲失败", e))?;
+            ptr::write_bytes(dst, 0, free as usize * self.format.frame_bytes());
+            self.render
+                .ReleaseBuffer(free, 0)
+                .map_err(|e| SinkError::from_hresult("提交设备缓冲失败", e))?;
+        }
+        Ok(free as usize)
+    }
+
     fn start(&mut self) -> Result<(), SinkError> {
         if self.running {
             return Ok(());
@@ -188,7 +176,7 @@ impl AudioSink for WasapiSink {
         Ok(())
     }
 
-    fn write(&mut self, interleaved: &[f32]) -> Result<(), SinkError> {
+    fn write(&mut self, interleaved: &[f32]) -> Result<WriteReport, SinkError> {
         let channels = self.format.channels as usize;
         if !interleaved.len().is_multiple_of(channels) {
             return Err(SinkError::MisalignedBuffer {
@@ -199,22 +187,21 @@ impl AudioSink for WasapiSink {
 
         let total_frames = interleaved.len() / channels;
         let mut done = 0usize;
+        let mut report = WriteReport::default();
 
         while done < total_frames {
-            self.wait_for_device()?;
+            let padding = self.padding()? as usize;
+            let free = self.buffer_frames as usize - padding.min(self.buffer_frames as usize);
+            if free == 0 {
+                self.wait_for_device()?;
+                continue;
+            }
+            if padding == 0 && self.running {
+                report.starved = true;
+            }
 
+            let n = free.min(total_frames - done);
             unsafe {
-                let padding = self
-                    .client
-                    .GetCurrentPadding()
-                    .map_err(|e| SinkError::from_hresult("查询缓冲余量失败", e))?;
-
-                let free = self.buffer_frames.saturating_sub(padding) as usize;
-                if free == 0 {
-                    continue;
-                }
-
-                let n = free.min(total_frames - done);
                 let dst = self
                     .render
                     .GetBuffer(n as u32)
@@ -226,11 +213,12 @@ impl AudioSink for WasapiSink {
                 self.render
                     .ReleaseBuffer(n as u32, 0)
                     .map_err(|e| SinkError::from_hresult("提交设备缓冲失败", e))?;
-
-                done += n;
             }
+
+            done += n;
+            report.queued_frames = padding + n;
         }
-        Ok(())
+        Ok(report)
     }
 }
 
@@ -238,15 +226,6 @@ impl Drop for WasapiSink {
     fn drop(&mut self) {
         let _ = self.stop();
     }
-}
-
-fn stream_latency_ms(client: &IAudioClient) -> Option<f64> {
-    let hns = unsafe { client.GetStreamLatency() }.ok()?;
-    (hns > 0).then(|| hns_to_ms(hns))
-}
-
-fn hns_to_ms(hns: i64) -> f64 {
-    hns as f64 / 10_000.0
 }
 
 unsafe fn write_samples(dst: *mut u8, src: &[f32], fmt: SampleFormat) {
@@ -274,13 +253,6 @@ unsafe fn write_samples(dst: *mut u8, src: &[f32], fmt: SampleFormat) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hns_converts_to_ms() {
-        assert_eq!(hns_to_ms(10_000), 1.0);
-        assert_eq!(hns_to_ms(132_000), 13.2);
-        assert_eq!(hns_to_ms(0), 0.0);
-    }
 
     fn rendered(fmt: SampleFormat, src: &[f32]) -> Vec<u8> {
         let mut buf = vec![0xAAu8; src.len() * fmt.bytes() + 8];

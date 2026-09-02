@@ -179,12 +179,6 @@ fn snapshot(metrics: &SharedMetrics) -> Option<UiState> {
     let m = guard.as_ref()?;
     let stats = m.stats();
 
-    let latency_ms = if m.sink_rate_hz() > 0.0 {
-        m.smoothed_fill() / m.sink_rate_hz() * 1000.0
-    } else {
-        0.0
-    };
-
     Some(UiState {
         state: m.state(),
         error: m.last_error(),
@@ -198,8 +192,8 @@ fn snapshot(metrics: &SharedMetrics) -> Option<UiState> {
         clamp_events: m.clamp_events(),
         sink_rate_hz: m.sink_rate_hz(),
         period_frames: m.period_frames(),
-        latency_ms,
-        driver_latency_ms: m.sink_latency_ms(),
+        latency_ms: m.latency_ms(),
+        device_starvations: m.device_starvations(),
         reconnects: m.reconnects(),
         frames_discarded: m.frames_discarded(),
     })
@@ -378,7 +372,7 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
                     widgets::stat_cell(
                         &mut cols[0],
                         "LATENCY",
-                        &format!("{:.0}", s.latency_ms + s.driver_latency_ms),
+                        &format!("{:.0}", s.latency_ms),
                         "ms",
                         theme::TEXT,
                     );
@@ -842,17 +836,17 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         .map(|v| format!("{v:.1}"))
         .unwrap_or_else(|| format!("raw {:.1}", s.raw_drift_ppm));
     format!(
-        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndriver_latency_ms={:.1}\ndrift_ppm={}\nring_frames={}\nperiod_frames={}\nsink_hz={:.0}",
+        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\nperiod_frames={}\nsink_hz={:.0}",
         s.state,
         s.fill_fraction * 100.0,
         s.underruns,
         s.overruns,
+        s.device_starvations,
         s.dropout_seconds,
         s.reconnects,
         s.frames_discarded,
         s.clamp_events,
         s.latency_ms,
-        s.driver_latency_ms,
         drift,
         s.capacity_frames,
         s.period_frames,

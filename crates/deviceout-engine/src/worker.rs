@@ -5,8 +5,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use deviceout_core::{DriftController, DriftResampler, DriftTuning, RingConsumer};
-use deviceout_sink::wasapi::{list_output_devices, ComGuard};
-use deviceout_sink::{AudioPriority, AudioSink, StreamFormat, WasapiSink};
+use deviceout_sink::{AudioSink, SinkError, StreamFormat};
 
 use crate::error::EngineError;
 use crate::metrics::{EngineMetrics, EngineState};
@@ -38,6 +37,22 @@ pub fn ring_capacity_frames(source_rate_hz: f64, ring_ms: f64) -> usize {
     ((source_rate_hz * ring_ms * 1.0e-3).round() as usize).max(2)
 }
 
+pub trait OpenSink: Send + 'static {
+    type Sink: AudioSink + 'static;
+    fn open(&mut self, config: &EngineConfig) -> Result<Self::Sink, SinkError>;
+}
+
+impl<S, F> OpenSink for F
+where
+    S: AudioSink + 'static,
+    F: FnMut(&EngineConfig) -> Result<S, SinkError> + Send + 'static,
+{
+    type Sink = S;
+    fn open(&mut self, config: &EngineConfig) -> Result<S, SinkError> {
+        self(config)
+    }
+}
+
 #[derive(Debug)]
 pub struct EngineHandle {
     metrics: Arc<EngineMetrics>,
@@ -62,11 +77,18 @@ impl Drop for EngineHandle {
     }
 }
 
+#[cfg(windows)]
 pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
+    start_with(consumer, config, |cfg: &EngineConfig| {
+        deviceout_sink::WasapiSink::open(&cfg.device_id, cfg.device_buffer_ms)
+    })
+}
+
+pub fn start_with<O: OpenSink>(consumer: RingConsumer, config: EngineConfig, open: O) -> EngineHandle {
     let metrics = Arc::new(EngineMetrics::new(Arc::clone(consumer.stats())));
     let stop = Arc::new(AtomicBool::new(false));
 
-    if let Err(e) = preflight(&consumer, &config) {
+    if let Err(e) = validate(&consumer, &config) {
         metrics.set_failed(e.to_string());
         return EngineHandle {
             metrics,
@@ -82,7 +104,7 @@ pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
         let stop = Arc::clone(&stop);
         thread::Builder::new()
             .name("deviceout-output".into())
-            .spawn(move || run(config, consumer, metrics, stop, ready_tx))
+            .spawn(move || run(config, open, consumer, metrics, stop, ready_tx))
     };
 
     match thread {
@@ -105,7 +127,7 @@ pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
     }
 }
 
-fn preflight(consumer: &RingConsumer, config: &EngineConfig) -> Result<(), EngineError> {
+fn validate(consumer: &RingConsumer, config: &EngineConfig) -> Result<(), EngineError> {
     if config.channels == 0 {
         return Err(EngineError::Config("声道数必须为正".into()));
     }
@@ -119,25 +141,6 @@ fn preflight(consumer: &RingConsumer, config: &EngineConfig) -> Result<(), Engin
     if !config.source_rate_hz.is_finite() || config.source_rate_hz <= 0.0 {
         return Err(EngineError::Config("DAW 侧采样率必须是有限正数".into()));
     }
-
-    let _com = ComGuard::new()?;
-    let device = list_output_devices()?
-        .into_iter()
-        .find(|d| d.id == config.device_id)
-        .ok_or_else(|| {
-            EngineError::Sink(deviceout_sink::SinkError::DeviceNotFound(
-                config.device_id.clone(),
-            ))
-        })?;
-
-    let device_channels = device.mix_format.channels as usize;
-    if device_channels != config.channels {
-        return Err(EngineError::ChannelMismatch {
-            device: device_channels,
-            source: config.channels,
-        });
-    }
-
     Ok(())
 }
 
@@ -170,25 +173,30 @@ fn signal_ready(ready: &mut Option<mpsc::Sender<()>>) {
     }
 }
 
-fn run(
+fn run<O: OpenSink>(
     config: EngineConfig,
+    mut open: O,
     mut rx: RingConsumer,
     metrics: Arc<EngineMetrics>,
     stop: Arc<AtomicBool>,
     ready: mpsc::Sender<()>,
 ) -> RingConsumer {
-    let _priority = AudioPriority::raise_current_thread().ok();
+    #[cfg(windows)]
+    let _priority = deviceout_sink::AudioPriority::raise_current_thread().ok();
 
     let mut ready = Some(ready);
     let mut saw_device_loss = false;
     let mut attempt = 0u32;
 
     while !stop.load(Ordering::Relaxed) {
-        match Worker::open(&config, &mut rx, &metrics) {
+        let opened = open
+            .open(&config)
+            .map_err(EngineError::from)
+            .and_then(|sink| Worker::new(sink, &config, &rx, &metrics));
+        match opened {
             Ok(mut worker) => {
                 if saw_device_loss {
-                    let discarded = worker.trim_backlog(&mut rx);
-                    metrics.record_reconnect(discarded);
+                    metrics.record_reconnect();
                     attempt = 0;
                 }
                 signal_ready(&mut ready);
@@ -231,8 +239,8 @@ fn run(
     rx
 }
 
-struct Worker {
-    sink: WasapiSink,
+struct Worker<S: AudioSink> {
+    sink: S,
     ctrl: DriftController,
     resampler: DriftResampler,
     pull_buf: Vec<f32>,
@@ -246,13 +254,13 @@ struct Worker {
     target_frames: f64,
 }
 
-impl Worker {
-    fn open(
+impl<S: AudioSink> Worker<S> {
+    fn new(
+        sink: S,
         config: &EngineConfig,
-        rx: &mut RingConsumer,
+        rx: &RingConsumer,
         metrics: &EngineMetrics,
     ) -> Result<Self, EngineError> {
-        let sink = WasapiSink::open(&config.device_id, config.device_buffer_ms)?;
         let format = sink.format();
         let channels = format.channels as usize;
         if channels != config.channels {
@@ -274,7 +282,14 @@ impl Worker {
         let pull_buf = vec![0.0f32; resampler.input_frames_max() * channels];
         let out_buf = vec![0.0f32; resampler.output_frames() * channels];
 
-        metrics.set_stream(sink_rate, period_frames, channels, rx.capacity_frames());
+        metrics.set_stream(
+            config.source_rate_hz,
+            sink_rate,
+            period_frames,
+            channels,
+            rx.capacity_frames(),
+            resampler.output_delay(),
+        );
         metrics.set_target(target_frames, config.tuning.settle_time_s * 3.0);
 
         Ok(Self {
@@ -336,23 +351,31 @@ impl Worker {
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
+        let discarded = self.trim_backlog(rx);
+        if discarded > 0 {
+            metrics.record_discard(discarded);
+        }
 
         self.sink.prefill_silence()?;
         self.sink.start()?;
         metrics.set_running();
-        metrics.set_sink_latency(self.sink.stream_latency_ms().unwrap_or(0.0));
 
         let mut period = 0usize;
         while !stop.load(Ordering::Relaxed) {
             let need = self.resampler.input_frames_next();
             let samples = need * self.channels;
-            debug_assert!(samples <= self.pull_buf.len());
+            if samples > self.pull_buf.len() {
+                return Err(EngineError::Config(format!(
+                    "重采样器索取 {need} 帧，超出预分配的 {} 帧",
+                    self.pull_buf.len() / self.channels
+                )));
+            }
 
             rx.pull(&mut self.pull_buf[..samples]);
             self.resampler
                 .process(&self.pull_buf[..samples], &mut self.out_buf)?;
 
-            self.sink.write(&self.out_buf)?;
+            let report = self.sink.write(&self.out_buf)?;
 
             let fill = rx.available_frames();
             period += 1;
@@ -369,6 +392,7 @@ impl Worker {
                 self.resampler.clamp_events(),
                 period as f64 * self.dt_s,
             );
+            metrics.publish_device(report.queued_frames, report.starved);
         }
 
         self.sink.stop()?;
@@ -376,7 +400,7 @@ impl Worker {
     }
 }
 
-impl std::fmt::Debug for Worker {
+impl<S: AudioSink> std::fmt::Debug for Worker<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Worker")
             .field("format", &self.format)

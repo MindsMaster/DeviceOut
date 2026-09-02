@@ -66,16 +66,39 @@ pub struct EngineMetrics {
     drift_ppm: AtomicU64,
     ratio: AtomicU64,
     clamp_events: AtomicU64,
+    source_rate_hz: AtomicU64,
     sink_rate_hz: AtomicU64,
-    sink_latency_ms: AtomicU64,
     period_frames: AtomicU64,
     channels: AtomicU64,
+    resampler_delay_frames: AtomicU64,
+    device_queue_frames: AtomicU64,
+    device_starvations: AtomicU64,
     running_seconds: AtomicU64,
     settled_after_s: AtomicU64,
     reconnects: AtomicU64,
     frames_discarded: AtomicU64,
 
     last_error: Mutex<Option<String>>,
+}
+
+pub fn latency_ms(
+    fill_frames: f64,
+    source_rate_hz: f64,
+    device_queue_frames: f64,
+    resampler_delay_frames: f64,
+    sink_rate_hz: f64,
+) -> f64 {
+    let ring = if source_rate_hz > 0.0 {
+        fill_frames / source_rate_hz
+    } else {
+        0.0
+    };
+    let device = if sink_rate_hz > 0.0 {
+        (device_queue_frames + resampler_delay_frames) / sink_rate_hz
+    } else {
+        0.0
+    };
+    (ring + device) * 1000.0
 }
 
 impl EngineMetrics {
@@ -90,10 +113,13 @@ impl EngineMetrics {
             drift_ppm: AtomicU64::new(0),
             ratio: AtomicU64::new(1.0f64.to_bits()),
             clamp_events: AtomicU64::new(0),
+            source_rate_hz: AtomicU64::new(0),
             sink_rate_hz: AtomicU64::new(0),
-            sink_latency_ms: AtomicU64::new(0),
             period_frames: AtomicU64::new(0),
             channels: AtomicU64::new(1),
+            resampler_delay_frames: AtomicU64::new(0),
+            device_queue_frames: AtomicU64::new(0),
+            device_starvations: AtomicU64::new(0),
             running_seconds: AtomicU64::new(0),
             settled_after_s: AtomicU64::new(f64::INFINITY.to_bits()),
             reconnects: AtomicU64::new(0),
@@ -120,10 +146,13 @@ impl EngineMetrics {
         self.set_state(EngineState::Reconnecting);
     }
 
-    pub(crate) fn record_reconnect(&self, discarded_frames: usize) {
+    pub(crate) fn record_reconnect(&self) {
         self.reconnects.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_discard(&self, frames: usize) {
         self.frames_discarded
-            .fetch_add(discarded_frames as u64, Ordering::Relaxed);
+            .fetch_add(frames as u64, Ordering::Relaxed);
     }
 
     pub(crate) fn set_failed(&self, message: String) {
@@ -135,17 +164,22 @@ impl EngineMetrics {
 
     pub(crate) fn set_stream(
         &self,
+        source_rate_hz: f64,
         sink_rate_hz: f64,
         period_frames: usize,
         channels: usize,
         capacity: usize,
+        resampler_delay_frames: usize,
     ) {
+        store_f64(&self.source_rate_hz, source_rate_hz);
         store_f64(&self.sink_rate_hz, sink_rate_hz);
         self.period_frames
             .store(period_frames as u64, Ordering::Relaxed);
         self.channels.store(channels as u64, Ordering::Relaxed);
         self.capacity_frames
             .store(capacity as u64, Ordering::Relaxed);
+        self.resampler_delay_frames
+            .store(resampler_delay_frames as u64, Ordering::Relaxed);
     }
 
     pub(crate) fn set_target(&self, target_frames: f64, settled_after_s: f64) {
@@ -153,8 +187,12 @@ impl EngineMetrics {
         store_f64(&self.settled_after_s, settled_after_s);
     }
 
-    pub(crate) fn set_sink_latency(&self, ms: f64) {
-        store_f64(&self.sink_latency_ms, ms.max(0.0));
+    pub(crate) fn publish_device(&self, queued_frames: usize, starved: bool) {
+        self.device_queue_frames
+            .store(queued_frames as u64, Ordering::Relaxed);
+        if starved {
+            self.device_starvations.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn publish(
@@ -244,12 +282,30 @@ impl EngineMetrics {
         self.frames_discarded.load(Ordering::Relaxed)
     }
 
+    pub fn source_rate_hz(&self) -> f64 {
+        load_f64(&self.source_rate_hz)
+    }
+
     pub fn sink_rate_hz(&self) -> f64 {
         load_f64(&self.sink_rate_hz)
     }
 
-    pub fn sink_latency_ms(&self) -> f64 {
-        load_f64(&self.sink_latency_ms)
+    pub fn device_queue_frames(&self) -> u64 {
+        self.device_queue_frames.load(Ordering::Relaxed)
+    }
+
+    pub fn device_starvations(&self) -> u64 {
+        self.device_starvations.load(Ordering::Relaxed)
+    }
+
+    pub fn latency_ms(&self) -> f64 {
+        latency_ms(
+            self.smoothed_fill(),
+            self.source_rate_hz(),
+            self.device_queue_frames() as f64,
+            self.resampler_delay_frames.load(Ordering::Relaxed) as f64,
+            self.sink_rate_hz(),
+        )
     }
 
     pub fn period_frames(&self) -> u64 {
@@ -300,11 +356,30 @@ mod tests {
         let m = metrics();
 
         m.set_reconnecting("设备失效".into());
-        m.record_reconnect(1234);
+        m.record_reconnect();
+        m.record_discard(1234);
         m.set_running();
 
         assert_eq!(m.reconnects(), 1);
         assert_eq!(m.frames_discarded(), 1234);
+    }
+
+    #[test]
+    fn latency_uses_each_side_in_its_own_clock() {
+        let ms = latency_ms(8192.0, 44_100.0, 1920.0, 128.0, 48_000.0);
+        let expected = (8192.0 / 44_100.0 + (1920.0 + 128.0) / 48_000.0) * 1000.0;
+        assert!((ms - expected).abs() < 1e-9);
+        assert_eq!(latency_ms(1000.0, 0.0, 0.0, 0.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn device_starvation_is_counted_per_event() {
+        let m = metrics();
+        m.publish_device(1920, false);
+        m.publish_device(480, true);
+        m.publish_device(960, true);
+        assert_eq!(m.device_queue_frames(), 960);
+        assert_eq!(m.device_starvations(), 2);
     }
 
     #[test]

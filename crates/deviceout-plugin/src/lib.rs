@@ -304,7 +304,7 @@ pub(crate) struct UiState {
     pub sink_rate_hz: f64,
     pub period_frames: u64,
     pub latency_ms: f64,
-    pub driver_latency_ms: f64,
+    pub device_starvations: u64,
     pub reconnects: u64,
     pub frames_discarded: u64,
 }

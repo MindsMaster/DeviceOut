@@ -15,10 +15,18 @@ pub use priority::AudioPriority;
 #[cfg(windows)]
 pub use render::WasapiSink;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteReport {
+    pub queued_frames: usize,
+    pub starved: bool,
+}
+
 pub trait AudioSink: Send {
     fn format(&self) -> StreamFormat;
     fn period_frames(&self) -> usize;
+    fn buffer_frames(&self) -> usize;
+    fn prefill_silence(&mut self) -> Result<usize, SinkError>;
     fn start(&mut self) -> Result<(), SinkError>;
     fn stop(&mut self) -> Result<(), SinkError>;
-    fn write(&mut self, interleaved: &[f32]) -> Result<(), SinkError>;
+    fn write(&mut self, interleaved: &[f32]) -> Result<WriteReport, SinkError>;
 }
