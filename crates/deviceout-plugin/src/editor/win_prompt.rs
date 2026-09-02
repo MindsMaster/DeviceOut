@@ -1,8 +1,13 @@
 use std::ffi::OsStr;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::ptr::null_mut;
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::Arc;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    FreeLibrary, GetLastError, ERROR_CLASS_ALREADY_EXISTS, HMODULE, HWND, LPARAM, LRESULT, POINT,
+    RECT, WPARAM,
+};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
     FillRect, GetStockObject, InflateRect, InvalidateRect, MapWindowPoints, RoundRect,
@@ -11,7 +16,10 @@ use windows_sys::Win32::Graphics::Gdi::{
     FF_SWISS, FW_NORMAL, FW_SEMIBOLD, HBRUSH, HDC, HFONT, HPEN, NULL_PEN, OUT_DEFAULT_PRECIS,
     PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
-use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::System::LibraryLoader::{
+    GetModuleHandleExW, GetModuleHandleW, GetProcAddress, LoadLibraryW,
+    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+};
 use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, EM_SETCUEBANNER, ODS_SELECTED, ODT_BUTTON};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetFocus, GetKeyState, SetFocus, VK_CONTROL, VK_ESCAPE, VK_RETURN,
@@ -20,10 +28,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetDlgCtrlID,
     GetForegroundWindow, GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, IsDialogMessageW, LoadCursorW, MoveWindow,
-    PostQuitMessage, RegisterClassW, SendMessageW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    TranslateMessage, BS_DEFPUSHBUTTON, BS_OWNERDRAW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
-    CW_USEDEFAULT, DM_SETDEFID, GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW, MINMAXINFO, MSG,
-    SM_CXSCREEN, SM_CYSCREEN, SWP_NOZORDER, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE,
+    PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, TranslateMessage, UnregisterClassW, BS_DEFPUSHBUTTON, BS_OWNERDRAW, CREATESTRUCTW,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, DM_SETDEFID, GWLP_USERDATA, HWND_TOP, IDC_ARROW,
+    MINMAXINFO, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOZORDER, SW_SHOW, WM_CLOSE, WM_COMMAND,
+    WM_CREATE,
     WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND,
     WM_GETMINMAXINFO, WM_KEYDOWN, WM_PAINT, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_CAPTION, WS_CHILD,
     WS_CLIPCHILDREN, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_THICKFRAME, WS_VISIBLE, WS_VSCROLL,
@@ -43,7 +52,6 @@ const ES_AUTOVSCROLL: u32 = 0x0040;
 const ES_AUTOHSCROLL: u32 = 0x0080;
 const ES_WANTRETURN: u32 = 0x1000;
 const WS_EX_DLGMODALFRAME: u32 = 0x0000_0001;
-const WS_EX_TOPMOST: u32 = 0x0000_0008;
 const EN_SETFOCUS: u32 = 0x0100;
 const EN_KILLFOCUS: u32 = 0x0200;
 const EM_SETMARGINS: u32 = 0x00D3;
@@ -80,8 +88,17 @@ const FONT_LBL_PX: i32 = 14;
 const FONT_EDIT_PX: i32 = 15;
 const FONT_BTN_PX: i32 = 14;
 
+pub type PromptWindow = Arc<AtomicIsize>;
+
+pub fn close_prompt(window: &PromptWindow) {
+    let hwnd = window.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        unsafe { PostMessageW(hwnd as HWND, WM_CLOSE, 0, 0) };
+    }
+}
+
 struct Feedback {
-    desc_hint: Vec<u16>,
+    desc_label: Vec<u16>,
     contact_hint: Vec<u16>,
     dpi: u32,
     title_lbl: HWND,
@@ -101,34 +118,48 @@ struct Feedback {
     result: Option<(String, String)>,
 }
 
-pub fn run_feedback(kind_is_bug: bool) -> Option<(String, String)> {
+pub fn run_feedback(kind_is_bug: bool, window: &PromptWindow) -> Option<(String, String)> {
     let title = if kind_is_bug {
         crate::i18n::pick("问题反馈", "Report a Bug")
     } else {
         crate::i18n::pick("功能建议", "Feature Request")
     };
-    let desc_hint = if kind_is_bug {
+    let desc_label = if kind_is_bug {
         crate::i18n::pick("描述遇到的问题", "Describe the problem")
     } else {
         crate::i18n::pick("描述想要的功能", "Describe the feature you want")
     };
-    let contact_hint = crate::i18n::pick("邮箱 / QQ……随意写，可留空", "Email / anything… optional");
-    unsafe { feedback_impl(title, desc_hint, contact_hint) }
+    let contact_hint = crate::i18n::pick("邮箱 / QQ，可留空", "Email / QQ, optional");
+    unsafe { feedback_impl(title, desc_label, contact_hint, window) }
 }
 
 fn dp(v: i32, dpi: u32) -> i32 {
     ((v as i64 * dpi as i64 + 48) / 96) as i32
 }
 
+unsafe fn own_module() -> HMODULE {
+    unsafe {
+        let mut module: HMODULE = null_mut();
+        let flags =
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+        let anchor = wndproc as *const u16;
+        if GetModuleHandleExW(flags, anchor, &mut module) == 0 {
+            return GetModuleHandleW(null_mut());
+        }
+        module
+    }
+}
+
 unsafe fn feedback_impl(
     title: &str,
-    desc_hint: &str,
+    desc_label: &str,
     contact_hint: &str,
+    window: &PromptWindow,
 ) -> Option<(String, String)> {
     unsafe {
-        enable_dpi_awareness();
+        let _dpi = ThreadDpiScope::per_monitor_v2();
 
-        let instance = GetModuleHandleW(null_mut());
+        let instance = own_module();
         let class_w = wide(CLASS);
         let bg_brush = CreateSolidBrush(CLR_BG);
         let field_brush = CreateSolidBrush(CLR_FIELD);
@@ -141,14 +172,18 @@ unsafe fn feedback_impl(
             hInstance: instance,
             hIcon: null_mut(),
             hCursor: LoadCursorW(null_mut(), IDC_ARROW),
-            hbrBackground: bg_brush,
+            hbrBackground: null_mut(),
             lpszMenuName: null_mut(),
             lpszClassName: class_w.as_ptr(),
         };
-        RegisterClassW(&wc);
+        if RegisterClassW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
+            DeleteObject(bg_brush);
+            DeleteObject(field_brush);
+            return None;
+        }
 
-        let mut feedback = Feedback {
-            desc_hint: wide(desc_hint),
+        let feedback = Box::into_raw(Box::new(Feedback {
+            desc_label: wide(desc_label),
             contact_hint: wide(contact_hint),
             dpi: 96,
             title_lbl: null_mut(),
@@ -166,11 +201,11 @@ unsafe fn feedback_impl(
             field_brush,
             focus_edit: null_mut(),
             result: None,
-        };
+        }));
 
         let title_w = wide(title);
         let hwnd = CreateWindowExW(
-            WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+            WS_EX_DLGMODALFRAME,
             class_w.as_ptr(),
             title_w.as_ptr(),
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
@@ -181,20 +216,23 @@ unsafe fn feedback_impl(
             null_mut(),
             null_mut(),
             instance,
-            (&mut feedback as *mut Feedback).cast(),
+            feedback.cast(),
         );
         if hwnd.is_null() {
-            DeleteObject(bg_brush);
-            DeleteObject(field_brush);
+            let feedback = Box::from_raw(feedback);
+            DeleteObject(feedback.bg_brush);
+            DeleteObject(feedback.field_brush);
+            UnregisterClassW(class_w.as_ptr(), instance);
             return None;
         }
+        window.store(hwnd as isize, Ordering::SeqCst);
 
         place_window(hwnd);
         enable_dark_title_bar(hwnd);
         enable_rounded_corners(hwnd);
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
-        SetFocus(feedback.desc_edit);
+        SetFocus((*feedback).desc_edit);
 
         let mut msg = std::mem::zeroed::<MSG>();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
@@ -205,10 +243,10 @@ unsafe fn feedback_impl(
                 }
                 if msg.wParam as u16 == VK_RETURN && GetKeyState(VK_CONTROL as i32) < 0 {
                     let focus = GetFocus();
-                    if focus == feedback.desc_edit || focus == feedback.contact_edit {
-                        feedback.result = Some((
-                            read_text(feedback.desc_edit),
-                            read_text(feedback.contact_edit),
+                    if focus == (*feedback).desc_edit || focus == (*feedback).contact_edit {
+                        (*feedback).result = Some((
+                            read_text((*feedback).desc_edit),
+                            read_text((*feedback).contact_edit),
                         ));
                         DestroyWindow(hwnd);
                         continue;
@@ -220,7 +258,9 @@ unsafe fn feedback_impl(
                 DispatchMessageW(&msg);
             }
         }
+        window.store(0, Ordering::SeqCst);
 
+        let feedback = Box::from_raw(feedback);
         for font in [
             feedback.font_title,
             feedback.font_lbl,
@@ -233,7 +273,50 @@ unsafe fn feedback_impl(
         }
         DeleteObject(feedback.bg_brush);
         DeleteObject(feedback.field_brush);
+        UnregisterClassW(class_w.as_ptr(), instance);
         feedback.result
+    }
+}
+
+struct ThreadDpiScope {
+    previous: isize,
+    restore: Option<unsafe extern "system" fn(isize) -> isize>,
+}
+
+impl ThreadDpiScope {
+    unsafe fn per_monitor_v2() -> Self {
+        unsafe {
+            let user32 = GetModuleHandleW(wide("user32.dll").as_ptr());
+            if user32.is_null() {
+                return Self {
+                    previous: 0,
+                    restore: None,
+                };
+            }
+            type FnSetThread = unsafe extern "system" fn(isize) -> isize;
+            match GetProcAddress(user32, b"SetThreadDpiAwarenessContext\0".as_ptr()) {
+                Some(p) => {
+                    let f: FnSetThread = std::mem::transmute(p);
+                    let previous = f(-4isize);
+                    Self {
+                        previous,
+                        restore: (previous != 0).then_some(f),
+                    }
+                }
+                None => Self {
+                    previous: 0,
+                    restore: None,
+                },
+            }
+        }
+    }
+}
+
+impl Drop for ThreadDpiScope {
+    fn drop(&mut self) {
+        if let Some(f) = self.restore {
+            unsafe { f(self.previous) };
+        }
     }
 }
 
@@ -263,7 +346,7 @@ unsafe fn place_window(hwnd: HWND) {
         let x = (cx - w / 2).clamp(0, (sw - w).max(0));
         let y = (cy - h / 2).clamp(0, (sh - h).max(0));
 
-        SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, 0);
+        SetWindowPos(hwnd, HWND_TOP, x, y, w, h, 0);
     }
 }
 
@@ -408,7 +491,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 
 unsafe fn build_controls(hwnd: HWND, feedback: &mut Feedback) {
     unsafe {
-        let instance = GetModuleHandleW(null_mut());
+        let instance = own_module();
 
         let title_w = {
             let len = GetWindowTextLengthW(hwnd).max(0) as usize;
@@ -418,7 +501,7 @@ unsafe fn build_controls(hwnd: HWND, feedback: &mut Feedback) {
             buf
         };
         let static_cls = wide("STATIC");
-        let desc_lbl_w = wide(crate::i18n::pick("描述", "Description"));
+        let desc_lbl_w = feedback.desc_label.clone();
         let contact_lbl_w = wide(crate::i18n::pick("联系方式", "Contact"));
         feedback.title_lbl = CreateWindowExW(
             0,
@@ -485,12 +568,6 @@ unsafe fn build_controls(hwnd: HWND, feedback: &mut Feedback) {
             null_mut(),
         );
         enable_dark_scrollbar(feedback.desc_edit);
-        SendMessageW(
-            feedback.desc_edit,
-            EM_SETCUEBANNER,
-            1,
-            feedback.desc_hint.as_ptr() as LPARAM,
-        );
 
         feedback.contact_edit = CreateWindowExW(
             0,
@@ -800,20 +877,6 @@ unsafe fn make_font(dpi: u32, px: i32, weight: i32) -> HFONT {
     }
 }
 
-unsafe fn enable_dpi_awareness() {
-    unsafe {
-        let user32 = GetModuleHandleW(wide("user32.dll").as_ptr());
-        if user32.is_null() {
-            return;
-        }
-        type FnSetContext = unsafe extern "system" fn(isize) -> i32;
-        if let Some(p) = GetProcAddress(user32, b"SetProcessDpiAwarenessContext\0".as_ptr()) {
-            let f: FnSetContext = std::mem::transmute(p);
-            f(-4isize);
-        }
-    }
-}
-
 unsafe fn dpi_for(hwnd: HWND) -> u32 {
     unsafe {
         let user32 = GetModuleHandleW(wide("user32.dll").as_ptr());
@@ -831,35 +894,39 @@ unsafe fn dpi_for(hwnd: HWND) -> u32 {
     }
 }
 
-unsafe fn enable_dark_title_bar(hwnd: HWND) {
+type FnSetAttr = unsafe extern "system" fn(HWND, u32, *const core::ffi::c_void, u32) -> i32;
+
+unsafe fn with_dwm_attr(hwnd: HWND, apply: impl Fn(FnSetAttr, HWND)) {
     unsafe {
         let dwm = LoadLibraryW(wide("dwmapi.dll").as_ptr());
         if dwm.is_null() {
             return;
         }
-        type FnSetAttr = unsafe extern "system" fn(HWND, u32, *const core::ffi::c_void, u32) -> i32;
         if let Some(p) = GetProcAddress(dwm, b"DwmSetWindowAttribute\0".as_ptr()) {
             let f: FnSetAttr = std::mem::transmute(p);
+            apply(f, hwnd);
+        }
+        FreeLibrary(dwm);
+    }
+}
+
+unsafe fn enable_dark_title_bar(hwnd: HWND) {
+    unsafe {
+        with_dwm_attr(hwnd, |f, hwnd| {
             let dark: i32 = 1;
             if f(hwnd, 20, &dark as *const _ as _, 4) != 0 {
                 f(hwnd, 19, &dark as *const _ as _, 4);
             }
-        }
+        });
     }
 }
 
 unsafe fn enable_rounded_corners(hwnd: HWND) {
     unsafe {
-        let dwm = LoadLibraryW(wide("dwmapi.dll").as_ptr());
-        if dwm.is_null() {
-            return;
-        }
-        type FnSetAttr = unsafe extern "system" fn(HWND, u32, *const core::ffi::c_void, u32) -> i32;
-        if let Some(p) = GetProcAddress(dwm, b"DwmSetWindowAttribute\0".as_ptr()) {
-            let f: FnSetAttr = std::mem::transmute(p);
+        with_dwm_attr(hwnd, |f, hwnd| {
             let pref: i32 = 2;
             f(hwnd, 33, &pref as *const _ as _, 4);
-        }
+        });
     }
 }
 
@@ -874,6 +941,7 @@ unsafe fn enable_dark_scrollbar(hwnd: HWND) {
             let f: FnSetTheme = std::mem::transmute(p);
             f(hwnd, wide("DarkMode_Explorer").as_ptr(), null_mut());
         }
+        FreeLibrary(uxtheme);
     }
 }
 

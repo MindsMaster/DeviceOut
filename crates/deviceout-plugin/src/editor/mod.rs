@@ -37,6 +37,20 @@ struct PromptWait {
     kind: FeedbackKind,
     diag: Option<String>,
     done: Arc<Mutex<Option<Option<(String, String)>>>>,
+    #[cfg(windows)]
+    window: win_prompt::PromptWindow,
+    #[cfg(windows)]
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl Drop for PromptWait {
+    fn drop(&mut self) {
+        win_prompt::close_prompt(&self.window);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 struct EditorUi {
@@ -735,14 +749,30 @@ fn open_feedback(
         };
         let done = Arc::new(Mutex::new(None));
         let slot = Arc::clone(&done);
+        let window: win_prompt::PromptWindow = Arc::default();
+        let window_for_thread = Arc::clone(&window);
         let is_bug = kind == FeedbackKind::Bug;
-        let _ = std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("deviceout-feedback".into())
             .spawn(move || {
-                let result = win_prompt::run_feedback(is_bug);
+                let result = win_prompt::run_feedback(is_bug, &window_for_thread);
                 *slot.lock() = Some(result);
             });
-        state.prompt_wait = Some(PromptWait { kind, diag, done });
+        let Ok(thread) = thread else {
+            state.send_note = Some((
+                Instant::now(),
+                i18n::pick("无法打开反馈窗口", "Could not open the feedback window").into(),
+                theme::RED,
+            ));
+            return;
+        };
+        state.prompt_wait = Some(PromptWait {
+            kind,
+            diag,
+            done,
+            window,
+            thread: Some(thread),
+        });
     }
     #[cfg(not(windows))]
     {
@@ -757,7 +787,7 @@ fn poll_prompt(state: &mut EditorUi) {
     let Some(result) = wait.done.lock().take() else {
         return;
     };
-    let wait = state.prompt_wait.take().expect("checked above");
+    let mut wait = state.prompt_wait.take().expect("checked above");
     let Some((message, contact)) = result else {
         return;
     };
@@ -765,7 +795,7 @@ fn poll_prompt(state: &mut EditorUi) {
     if message.is_empty() {
         return;
     }
-    match queue_feedback(wait.kind, message, &contact, wait.diag) {
+    match queue_feedback(wait.kind, message, &contact, wait.diag.take()) {
         Ok(id) => {
             deviceout_update::spawn_updater(&[OsStr::new("--send-outbox")]);
             state.send_watch = Some((id, Instant::now()));
