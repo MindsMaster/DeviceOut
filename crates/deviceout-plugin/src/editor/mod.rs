@@ -7,23 +7,17 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::{Mutex, RwLock};
 
-use deviceout_core::RingProducer;
-use deviceout_engine::EngineMetrics;
 use deviceout_sink::DeviceInfo;
 use deviceout_update::outbox::FeedbackKind;
 
 use crate::i18n;
-use crate::{
-    clamp_ring_frames, enumerate_devices, DeviceOut, DeviceOutParams, EngineSlot, UiState,
-    RING_FRAME_STEPS,
-};
+use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, RING_FRAME_STEPS};
 
 mod theme;
 mod widgets;
 #[cfg(windows)]
 mod win_prompt;
 
-type SharedMetrics = Arc<RwLock<Option<Arc<EngineMetrics>>>>;
 type SharedDevices = Arc<RwLock<Vec<DeviceInfo>>>;
 
 const INSTALL_BUTTON_COOLDOWN: Duration = Duration::from_secs(30);
@@ -35,9 +29,7 @@ const QQ_GROUP_URL: &str = "https://qun.qq.com/universal-share/share?ac=1&authKe
 
 pub(crate) struct Wiring {
     pub params: Arc<DeviceOutParams>,
-    pub slot: Arc<Mutex<EngineSlot>>,
-    pub producer: Arc<Mutex<Option<RingProducer>>>,
-    pub metrics: SharedMetrics,
+    pub engine: Arc<EngineController>,
     pub devices: SharedDevices,
 }
 
@@ -113,7 +105,7 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
                                     ..egui::Margin::ZERO
                                 })
                                 .show(ui, |ui| {
-                                    let snap = snapshot(&w.metrics);
+                                    let snap = snapshot(&w.engine);
 
                                     header(ui, snap.as_ref());
                                     ui.add_space(12.0);
@@ -174,9 +166,8 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
     )
 }
 
-fn snapshot(metrics: &SharedMetrics) -> Option<UiState> {
-    let guard = metrics.read();
-    let m = guard.as_ref()?;
+fn snapshot(engine: &EngineController) -> Option<UiState> {
+    let m = engine.metrics()?;
     let stats = m.stats();
 
     Some(UiState {
@@ -318,9 +309,7 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
             if let Some(id) = chosen {
                 if id != current_id {
                     *w.params.device_id.write() = id.clone();
-                    let mut guard = w.slot.lock();
-                    DeviceOut::restart_locked(&mut guard, id);
-                    *w.metrics.write() = guard.handle.as_ref().map(|h| Arc::clone(h.metrics()));
+                    w.engine.set_device_async(id);
                 }
             }
         });
@@ -349,18 +338,21 @@ fn fill_card(ui: &mut egui::Ui, s: &UiState) {
     });
 }
 
-fn ring_step_index(frames: u32) -> usize {
-    RING_FRAME_STEPS
+fn ring_step_index(steps: &[u32], frames: u32) -> usize {
+    steps
         .iter()
-        .position(|&step| step == frames)
-        .unwrap_or_else(|| {
-            RING_FRAME_STEPS
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, step)| step.abs_diff(frames))
-                .map(|(i, _)| i)
-                .unwrap_or(0)
-        })
+        .enumerate()
+        .min_by_key(|(_, step)| step.abs_diff(frames))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+fn allowed_ring_steps(floor: u32) -> &'static [u32] {
+    let first = RING_FRAME_STEPS
+        .iter()
+        .position(|&s| s >= floor)
+        .unwrap_or(RING_FRAME_STEPS.len() - 1);
+    &RING_FRAME_STEPS[first..]
 }
 
 fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
@@ -403,7 +395,8 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
 
-        let committed = clamp_ring_frames(*w.params.ring_frames.read());
+        let steps = allowed_ring_steps(w.engine.ring_floor());
+        let committed = w.engine.ring_frames();
         let shown = state.ring_drag.unwrap_or(committed);
         widgets::section_heading(
             ui,
@@ -416,9 +409,9 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
         );
         ui.add_space(8.0);
 
-        let mut idx = ring_step_index(shown);
-        let slider = widgets::stepped_slider(ui, &mut idx, RING_FRAME_STEPS.len());
-        let next = RING_FRAME_STEPS[idx.min(RING_FRAME_STEPS.len() - 1)];
+        let mut idx = ring_step_index(steps, shown);
+        let slider = widgets::stepped_slider(ui, &mut idx, steps.len());
+        let next = steps[idx.min(steps.len() - 1)];
         if slider.dragged() {
             state.ring_drag = Some(next);
         }
@@ -427,7 +420,7 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
             state.ring_drag = None;
             if next != committed {
                 *w.params.ring_frames.write() = next;
-                DeviceOut::apply_ring_frames(&w.producer, &w.slot, &w.metrics, next);
+                w.engine.set_ring_frames_async(next);
             }
         }
     });
