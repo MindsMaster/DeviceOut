@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "По умолчанию в системе",
     refresh_devices: "Обновить список устройств",
 
+    heading_output: "Устройство вывода",
+    heading_buffer: "Буфер",
+    heading_latency: "Задержка",
+    heading_drift: "Дрейф",
+    heading_format: "Формат",
+    heading_buffer_size: "Размер буфера",
+    mix_format: "{rate} Hz / {channels} ch / {sample}",
+    sample_f32: "32-bit float",
+    sample_i16: "16-bit int",
+    sample_i32: "32-bit int",
+
     state_running: "Работает",
     state_priming: "Заполнение",
     state_stopped: "Остановлено",

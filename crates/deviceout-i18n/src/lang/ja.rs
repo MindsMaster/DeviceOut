@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "システム既定",
     refresh_devices: "デバイス一覧を更新",
 
+    heading_output: "出力デバイス",
+    heading_buffer: "バッファー",
+    heading_latency: "レイテンシ",
+    heading_drift: "ドリフト",
+    heading_format: "フォーマット",
+    heading_buffer_size: "バッファーサイズ",
+    mix_format: "{rate} Hz / {channels} ch / {sample}",
+    sample_f32: "32-bit float",
+    sample_i16: "16-bit int",
+    sample_i32: "32-bit int",
+
     state_running: "動作中",
     state_priming: "準備中",
     state_stopped: "停止",

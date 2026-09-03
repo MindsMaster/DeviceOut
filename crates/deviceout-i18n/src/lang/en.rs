@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "System default",
     refresh_devices: "Refresh device list",
 
+    heading_output: "Output device",
+    heading_buffer: "Buffer",
+    heading_latency: "Latency",
+    heading_drift: "Drift",
+    heading_format: "Format",
+    heading_buffer_size: "Buffer size",
+    mix_format: "{rate} Hz / {channels} ch / {sample}",
+    sample_f32: "32-bit float",
+    sample_i16: "16-bit int",
+    sample_i32: "32-bit int",
+
     state_running: "Running",
     state_priming: "Priming",
     state_stopped: "Stopped",

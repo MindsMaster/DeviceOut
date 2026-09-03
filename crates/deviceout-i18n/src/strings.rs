@@ -9,6 +9,17 @@ pub struct Strings {
     pub system_default: &'static str,
     pub refresh_devices: &'static str,
 
+    pub heading_output: &'static str,
+    pub heading_buffer: &'static str,
+    pub heading_latency: &'static str,
+    pub heading_drift: &'static str,
+    pub heading_format: &'static str,
+    pub heading_buffer_size: &'static str,
+    pub mix_format: &'static str,
+    pub sample_f32: &'static str,
+    pub sample_i16: &'static str,
+    pub sample_i32: &'static str,
+
     pub state_running: &'static str,
     pub state_priming: &'static str,
     pub state_stopped: &'static str,

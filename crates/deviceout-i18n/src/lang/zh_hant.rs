@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "系統預設",
     refresh_devices: "重新整理裝置清單",
 
+    heading_output: "輸出裝置",
+    heading_buffer: "緩衝",
+    heading_latency: "延遲",
+    heading_drift: "漂移",
+    heading_format: "格式",
+    heading_buffer_size: "緩衝大小",
+    mix_format: "{rate} Hz / {channels} 聲道 / {sample}",
+    sample_f32: "32 位元浮點",
+    sample_i16: "16 位元整數",
+    sample_i32: "32 位元整數",
+
     state_running: "運作中",
     state_priming: "預填充",
     state_stopped: "已停止",

@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "Par défaut du système",
     refresh_devices: "Actualiser la liste des périphériques",
 
+    heading_output: "Périphérique de sortie",
+    heading_buffer: "Tampon",
+    heading_latency: "Latence",
+    heading_drift: "Dérive",
+    heading_format: "Format",
+    heading_buffer_size: "Taille du tampon",
+    mix_format: "{rate} Hz / {channels} ch / {sample}",
+    sample_f32: "32-bit float",
+    sample_i16: "16-bit int",
+    sample_i32: "32-bit int",
+
     state_running: "En cours",
     state_priming: "Préremplissage",
     state_stopped: "Arrêté",

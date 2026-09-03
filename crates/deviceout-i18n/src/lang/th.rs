@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "ค่าเริ่มต้นของระบบ",
     refresh_devices: "รีเฟรชรายการอุปกรณ์",
 
+    heading_output: "อุปกรณ์เอาต์พุต",
+    heading_buffer: "บัฟเฟอร์",
+    heading_latency: "ความหน่วง",
+    heading_drift: "ดริฟต์",
+    heading_format: "รูปแบบ",
+    heading_buffer_size: "ขนาดบัฟเฟอร์",
+    mix_format: "{rate} Hz / {channels} ch / {sample}",
+    sample_f32: "32-bit float",
+    sample_i16: "16-bit int",
+    sample_i32: "32-bit int",
+
     state_running: "กำลังทำงาน",
     state_priming: "กำลังเตรียม",
     state_stopped: "หยุดแล้ว",

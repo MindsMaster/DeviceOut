@@ -282,12 +282,13 @@ mod tests {
     #[test]
     fn every_language_fills_every_placeholder_the_english_table_uses() {
         let en = Lang::En.strings();
-        let templates: [(&str, Field); 9] = [
+        let templates: [(&str, Field); 10] = [
             ("fault_channel_mismatch", |s| s.fault_channel_mismatch),
             ("fault_retry", |s| s.fault_retry),
             ("alert_dropouts", |s| s.alert_dropouts),
             ("alert_reconnects", |s| s.alert_reconnects),
             ("alert_clamps", |s| s.alert_clamps),
+            ("mix_format", |s| s.mix_format),
             ("update_ready", |s| s.update_ready),
             ("update_available", |s| s.update_available),
             ("up_to_date", |s| s.up_to_date),

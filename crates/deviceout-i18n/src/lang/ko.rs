@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "시스템 기본값",
     refresh_devices: "장치 목록 새로 고침",
 
+    heading_output: "출력 장치",
+    heading_buffer: "버퍼",
+    heading_latency: "레이턴시",
+    heading_drift: "드리프트",
+    heading_format: "포맷",
+    heading_buffer_size: "버퍼 크기",
+    mix_format: "{rate} Hz / {channels} ch / {sample}",
+    sample_f32: "32-bit float",
+    sample_i16: "16-bit int",
+    sample_i32: "32-bit int",
+
     state_running: "실행 중",
     state_priming: "준비 중",
     state_stopped: "중지됨",

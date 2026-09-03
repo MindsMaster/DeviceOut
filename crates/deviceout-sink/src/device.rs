@@ -19,9 +19,9 @@ impl SampleFormat {
 impl fmt::Display for SampleFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::F32 => write!(f, "32 位浮点"),
-            Self::I16 => write!(f, "16 位整型"),
-            Self::I32 => write!(f, "32 位整型"),
+            Self::F32 => write!(f, "f32"),
+            Self::I16 => write!(f, "i16"),
+            Self::I32 => write!(f, "i32"),
         }
     }
 }
@@ -43,7 +43,7 @@ impl fmt::Display for StreamFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} Hz / {} 声道 / {}",
+            "{} Hz / {} ch / {}",
             self.sample_rate, self.channels, self.sample_format
         )
     }
@@ -63,7 +63,7 @@ impl fmt::Display for DeviceInfo {
             f,
             "{}{}  [{}]",
             self.name,
-            if self.is_default { " (默认)" } else { "" },
+            if self.is_default { " (default)" } else { "" },
             self.mix_format
         )
     }

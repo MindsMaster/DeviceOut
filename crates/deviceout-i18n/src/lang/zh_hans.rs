@@ -10,6 +10,17 @@ pub static STRINGS: Strings = Strings {
     system_default: "系统默认",
     refresh_devices: "刷新设备列表",
 
+    heading_output: "输出设备",
+    heading_buffer: "缓冲",
+    heading_latency: "延迟",
+    heading_drift: "漂移",
+    heading_format: "格式",
+    heading_buffer_size: "缓冲大小",
+    mix_format: "{rate} Hz / {channels} 声道 / {sample}",
+    sample_f32: "32 位浮点",
+    sample_i16: "16 位整型",
+    sample_i32: "32 位整型",
+
     state_running: "运行中",
     state_priming: "预填充",
     state_stopped: "已停止",
