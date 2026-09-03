@@ -10,3 +10,4 @@
 /packaging/out
 /packaging/keys
 /.build
+/github-release-*.md
