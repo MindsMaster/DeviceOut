@@ -9,11 +9,12 @@ use parking_lot::{Mutex, RwLock};
 
 use deviceout_engine::{Fault, FaultKind};
 use deviceout_i18n::{fill, t};
-use deviceout_sink::DeviceInfo;
+use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
 use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, RING_FRAME_STEPS};
 
+mod fonts;
 mod theme;
 mod widgets;
 #[cfg(windows)]
@@ -139,7 +140,6 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
                                             stats_card(ui, Some(s));
                                             ui.add_space(12.0);
                                             size_card(ui, state, &w);
-                                            alerts(ui, s);
                                         }
                                         None => {
                                             stats_card(ui, None);
@@ -264,12 +264,12 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
             .iter()
             .find(|d| d.id == current_id)
             .map(|d| {
-                egui::RichText::new(d.mix_format.to_string())
+                egui::RichText::new(mix_format_text(&d.mix_format))
                     .font(egui::FontId::proportional(11.0))
                     .color(theme::TEXT_FAINT)
             });
 
-        widgets::section_heading(ui, "OUTPUT DEVICE", format_text);
+        widgets::section_heading(ui, t().heading_output, format_text);
         ui.add_space(4.0);
 
         let current_name = w
@@ -364,7 +364,7 @@ fn fill_card(ui: &mut egui::Ui, s: &UiState) {
         ui.set_width(ui.available_width());
         widgets::section_heading(
             ui,
-            "BUFFER",
+            t().heading_buffer,
             Some(
                 egui::RichText::new(format!("{:.0}%", s.fill_fraction * 100.0))
                     .font(egui::FontId::monospace(12.0))
@@ -401,7 +401,7 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
                 Some(s) => {
                     widgets::stat_cell(
                         &mut cols[0],
-                        "LATENCY",
+                        t().heading_latency,
                         &format!("{:.0}", s.latency_ms),
                         "ms",
                         theme::TEXT,
@@ -410,19 +410,19 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
                         Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT),
                         None => (format!("{:+.0}…", s.raw_drift_ppm), theme::TEXT_DIM),
                     };
-                    widgets::stat_cell(&mut cols[1], "DRIFT", &drift, "ppm", drift_color);
+                    widgets::stat_cell(&mut cols[1], t().heading_drift, &drift, "ppm", drift_color);
                     widgets::stat_cell(
                         &mut cols[2],
-                        "FORMAT",
+                        t().heading_format,
                         &format!("{:.1}", s.sink_rate_hz / 1000.0),
                         "kHz",
                         theme::TEXT,
                     );
                 }
                 None => {
-                    widgets::stat_cell(&mut cols[0], "LATENCY", "—", "", theme::TEXT_FAINT);
-                    widgets::stat_cell(&mut cols[1], "DRIFT", "—", "", theme::TEXT_FAINT);
-                    widgets::stat_cell(&mut cols[2], "FORMAT", "—", "", theme::TEXT_FAINT);
+                    widgets::stat_cell(&mut cols[0], t().heading_latency, "—", "", theme::TEXT_FAINT);
+                    widgets::stat_cell(&mut cols[1], t().heading_drift, "—", "", theme::TEXT_FAINT);
+                    widgets::stat_cell(&mut cols[2], t().heading_format, "—", "", theme::TEXT_FAINT);
                 }
             }
         });
@@ -438,7 +438,7 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
         let shown = state.ring_drag.unwrap_or(committed);
         widgets::section_heading(
             ui,
-            "BUFFER SIZE",
+            t().heading_buffer_size,
             Some(
                 egui::RichText::new(thousands(u64::from(shown)))
                     .font(egui::FontId::monospace(12.0))
@@ -464,57 +464,21 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
     });
 }
 
-fn alerts(ui: &mut egui::Ui, s: &UiState) {
-    let mut lines: Vec<(egui::Color32, String)> = Vec::new();
-
+fn mix_format_text(fmt: &StreamFormat) -> String {
     let t = t();
-    if s.underruns > 0 || s.overruns > 0 {
-        let text = fill(
-            t.alert_dropouts,
-            &[
-                ("underruns", &s.underruns.to_string()),
-                ("overruns", &s.overruns.to_string()),
-                ("seconds", &format!("{:.2}", s.dropout_seconds)),
-            ],
-        );
-        lines.push((theme::RED, text));
-    }
-
-    if s.reconnects > 0 {
-        let discarded_s = if s.sink_rate_hz > 0.0 {
-            s.frames_discarded as f64 / s.sink_rate_hz
-        } else {
-            0.0
-        };
-        let text = fill(
-            t.alert_reconnects,
-            &[
-                ("count", &s.reconnects.to_string()),
-                ("frames", &s.frames_discarded.to_string()),
-                ("seconds", &format!("{discarded_s:.2}")),
-            ],
-        );
-        lines.push((theme::ORANGE, text));
-    }
-
-    if s.clamp_events > 0 {
-        let text = fill(t.alert_clamps, &[("count", &s.clamp_events.to_string())]);
-        lines.push((theme::AMBER, text));
-    }
-
-    if lines.is_empty() {
-        return;
-    }
-
-    ui.add_space(12.0);
-    theme::card_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        widgets::section_heading(ui, "EVENTS", None);
-        ui.add_space(2.0);
-        for (color, text) in lines {
-            widgets::alert_line(ui, color, text);
-        }
-    });
+    let sample = match fmt.sample_format {
+        SampleFormat::F32 => t.sample_f32,
+        SampleFormat::I16 => t.sample_i16,
+        SampleFormat::I32 => t.sample_i32,
+    };
+    fill(
+        t.mix_format,
+        &[
+            ("rate", &fmt.sample_rate.to_string()),
+            ("channels", &fmt.channels.to_string()),
+            ("sample", sample),
+        ],
+    )
 }
 
 fn idle_card(ui: &mut egui::Ui) {
@@ -599,43 +563,73 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
     );
 
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(10.0, 14.0), egui::Sense::hover());
-        ui.painter().circle_filled(rect.center(), 3.0, color);
-        let label = ui.label(
-            egui::RichText::new(&status)
-                .size(11.5)
-                .color(theme::TEXT_DIM),
-        );
-        if let Some(tip) = tip {
-            label.on_hover_text(tip);
-        }
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let checking = state.check_busy_since.is_some();
+        let action = if checking {
+            t().checking
+        } else {
+            t().check_updates
+        };
+        let action_w = button_width(ui, action);
+        let install_w = if pending.is_some() {
+            button_width(ui, t().install) + 8.0
+        } else {
+            0.0
+        };
+        let left_w = (ui.available_width() - action_w - install_w).max(48.0);
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if pending.is_some() {
-                ui.add_enabled_ui(state.install_started.is_none(), |ui| {
-                    if widgets::primary_button(ui, t().install).clicked() {
-                        state.install_started = Some(Instant::now());
-                        state.update_view = None;
-                        deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
-                    }
-                });
+        ui.allocate_ui_with_layout(
+            egui::Vec2::new(left_w, 30.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::new(10.0, 14.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 3.0, color);
+                let label = ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&status)
+                            .size(11.5)
+                            .color(theme::TEXT_DIM),
+                    )
+                    .truncate(),
+                );
+                if let Some(tip) = tip {
+                    label.on_hover_text(tip);
+                }
+            },
+        );
+
+        ui.add_enabled_ui(!checking, |ui| {
+            if widgets::outline_button(ui, action).clicked() {
+                state.check_mark_attempt = st.last_attempt;
+                state.check_busy_since = Some(Instant::now());
+                state.update_view = None;
+                spawn_check_now(bundle);
             }
-            let checking = state.check_busy_since.is_some();
-            ui.add_enabled_ui(!checking, |ui| {
-                let label = if checking {
-                    t().checking
-                } else {
-                    t().check_updates
-                };
-                if widgets::outline_button(ui, label).clicked() {
-                    state.check_mark_attempt = st.last_attempt;
-                    state.check_busy_since = Some(Instant::now());
+        });
+        if pending.is_some() {
+            ui.add_enabled_ui(state.install_started.is_none(), |ui| {
+                if widgets::primary_button(ui, t().install).clicked() {
+                    state.install_started = Some(Instant::now());
                     state.update_view = None;
-                    spawn_check_now(bundle);
+                    deviceout_update::spawn_updater(&[OsStr::new("--apply-pending")]);
                 }
             });
-        });
+        }
     });
+}
+
+fn button_width(ui: &egui::Ui, label: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            label.to_string(),
+            egui::FontId::proportional(12.5),
+            theme::TEXT,
+        )
+        .size()
+        .x
+        + 24.0
 }
 
 fn spawn_check_now(bundle: Option<&PathBuf>) {
@@ -722,28 +716,31 @@ fn feedback_row(
     snap: Option<&UiState>,
     device_line: &str,
 ) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let waiting = state.prompt_wait.is_some();
-        ui.add_enabled_ui(!waiting, |ui| {
-            if widgets::outline_button(ui, t().report_bug).clicked() {
+    let waiting = state.prompt_wait.is_some();
+    ui.add_enabled_ui(!waiting, |ui| {
+        ui.columns(2, |cols| {
+            if widgets::outline_button_fill(&mut cols[0], t().report_bug).clicked() {
                 open_feedback(state, FeedbackKind::Bug, bundle, snap, device_line);
             }
-            if widgets::outline_button(ui, t().feature_request).clicked() {
+            if widgets::outline_button_fill(&mut cols[1], t().feature_request).clicked() {
                 open_feedback(state, FeedbackKind::Feature, bundle, snap, device_line);
             }
         });
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
+    });
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if widgets::switch(ui, &mut state.telemetry_opt_in).changed() {
+            deviceout_update::telemetry::set_enabled(state.telemetry_opt_in);
+        }
+        ui.add(
+            egui::Label::new(
                 egui::RichText::new(t().usage_stats)
                     .size(10.5)
                     .color(theme::TEXT_FAINT),
-            );
-            if widgets::switch(ui, &mut state.telemetry_opt_in).changed() {
-                deviceout_update::telemetry::set_enabled(state.telemetry_opt_in);
-            }
-        });
+            )
+            .truncate(),
+        );
     });
 }
 

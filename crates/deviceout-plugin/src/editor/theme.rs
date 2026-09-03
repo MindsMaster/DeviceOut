@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
-
-use deviceout_i18n::Script;
 use nih_plug_egui::egui::{
-    self, Color32, CornerRadius, FontId, Margin, Stroke, TextStyle, Vec2, Visuals,
+    self, Color32, CornerRadius, FontData, FontFamily, FontId, Margin, Stroke, TextStyle, Vec2,
+    Visuals,
 };
+
+use super::fonts;
 
 pub(crate) const BG: Color32 = Color32::from_rgb(9, 9, 11);
 pub(crate) const CARD: Color32 = Color32::from_rgb(16, 16, 20);
@@ -106,60 +104,44 @@ pub(crate) fn card_frame() -> egui::Frame {
         .inner_margin(Margin::symmetric(14, 12))
 }
 
-type LoadedFont = Option<(String, Arc<egui::FontData>)>;
+pub(crate) use super::fonts::script_family;
 
-pub(crate) fn install_fonts(ctx: &egui::Context, script: Script) {
+pub(crate) fn install_fonts(ctx: &egui::Context, script: deviceout_i18n::Script) {
+    #[cfg(windows)]
+    super::win_prompt::ensure_noto_gdi();
+
     let mut fonts = egui::FontDefinitions::default();
-    let mut names = Vec::new();
-    for candidates in [script_fonts(script), script_fonts(Script::Hans)] {
-        if let Some((name, data)) = cached_font(candidates) {
-            if !names.contains(&name) {
-                fonts.font_data.insert(name.clone(), data);
-                names.push(name);
-            }
-        }
+    fonts
+        .font_data
+        .insert(fonts::NAME_SANS.into(), FontData::from_static(fonts::NOTO_SANS).into());
+    fonts
+        .font_data
+        .insert(fonts::NAME_THAI.into(), FontData::from_static(fonts::NOTO_THAI).into());
+    for (name, index) in fonts::cjk_faces() {
+        fonts
+            .font_data
+            .insert(name.into(), fonts::cjk_data(index).into());
     }
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+
+    for script in [
+        deviceout_i18n::Script::Hans,
+        deviceout_i18n::Script::Hant,
+        deviceout_i18n::Script::Japanese,
+        deviceout_i18n::Script::Korean,
+        deviceout_i18n::Script::Thai,
+    ] {
+        fonts
+            .families
+            .insert(fonts::script_family(script), fonts::named_family_chain(script));
+    }
+
+    let ui = fonts::ui_chain(script);
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts
             .families
             .entry(family)
             .or_default()
-            .extend(names.iter().cloned());
+            .splice(0..0, ui.iter().cloned());
     }
     ctx.set_fonts(fonts);
-}
-
-fn script_fonts(script: Script) -> &'static [&'static str] {
-    match script {
-        Script::Hans => &["msyh.ttc", "msyh.ttf", "deng.ttf", "simhei.ttf", "simsun.ttc"],
-        Script::Hant => &["msjh.ttc", "msjh.ttf", "mingliu.ttc"],
-        Script::Japanese => &["YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"],
-        Script::Korean => &["malgun.ttf", "gulim.ttc"],
-        Script::Thai => &["LeelawUI.ttf", "leelawad.ttf", "tahoma.ttf"],
-        Script::Latin => &[],
-    }
-}
-
-fn cached_font(candidates: &'static [&'static str]) -> LoadedFont {
-    static CACHE: OnceLock<Mutex<HashMap<&'static str, LoadedFont>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let key = candidates.first()?;
-    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
-    cache
-        .entry(key)
-        .or_insert_with(|| load_first_font(candidates))
-        .clone()
-}
-
-fn load_first_font(candidates: &[&str]) -> LoadedFont {
-    let root =
-        std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-    let fonts_dir = root.join("Fonts");
-    for file in candidates {
-        let Ok(bytes) = std::fs::read(fonts_dir.join(file)) else {
-            continue;
-        };
-        return Some(((*file).to_string(), Arc::new(egui::FontData::from_owned(bytes))));
-    }
-    None
 }

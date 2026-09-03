@@ -9,9 +9,9 @@ use windows_sys::Win32::Foundation::{
     RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-    FillRect, GetStockObject, InflateRect, InvalidateRect, MapWindowPoints, RoundRect,
-    SelectObject, SetBkColor, SetBkMode, SetTextColor, UpdateWindow, CLEARTYPE_QUALITY,
+    AddFontMemResourceEx, BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject,
+    DrawTextW, EndPaint, FillRect, GetStockObject, InflateRect, InvalidateRect, MapWindowPoints,
+    RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, UpdateWindow, CLEARTYPE_QUALITY,
     CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
     FF_SWISS, FW_NORMAL, FW_SEMIBOLD, HBRUSH, HDC, HFONT, HPEN, NULL_PEN, OUT_DEFAULT_PRECIS,
     PAINTSTRUCT, PS_SOLID, TRANSPARENT,
@@ -872,15 +872,27 @@ unsafe fn make_font(dpi: u32, px: i32, weight: i32) -> HFONT {
 }
 
 fn font_face() -> &'static str {
-    use deviceout_i18n::Script;
-    match deviceout_i18n::current().script() {
-        Script::Hans => "Microsoft YaHei UI",
-        Script::Hant => "Microsoft JhengHei UI",
-        Script::Japanese => "Yu Gothic UI",
-        Script::Korean => "Malgun Gothic",
-        Script::Thai => "Leelawadee UI",
-        Script::Latin => "Segoe UI",
-    }
+    super::fonts::gdi_face(deviceout_i18n::current().script())
+}
+
+pub(crate) fn ensure_noto_gdi() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| unsafe {
+        for bytes in [
+            super::fonts::NOTO_SANS,
+            super::fonts::NOTO_THAI,
+            super::fonts::NOTO_CJK,
+        ] {
+            let mut n = 0u32;
+            let _ = AddFontMemResourceEx(
+                bytes.as_ptr() as *const _,
+                bytes.len() as u32,
+                std::ptr::null(),
+                &mut n,
+            );
+        }
+    });
 }
 
 unsafe fn dpi_for(hwnd: HWND) -> u32 {

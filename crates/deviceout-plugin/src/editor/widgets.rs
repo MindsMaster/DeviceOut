@@ -3,6 +3,7 @@ use nih_plug_egui::egui::{
 };
 
 use deviceout_engine::EngineState;
+use deviceout_i18n::Lang;
 
 use super::theme;
 
@@ -20,7 +21,7 @@ pub(crate) fn section_heading(ui: &mut egui::Ui, title: &str, trailing: Option<R
         heading_text(ui, title);
         if let Some(text) = trailing {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(text);
+                ui.add(egui::Label::new(text).truncate());
             });
         }
     });
@@ -34,12 +35,18 @@ struct ButtonSpec {
     hover_text: Color32,
 }
 
-fn styled_button(ui: &mut egui::Ui, label: &str, spec: ButtonSpec) -> Response {
+fn styled_button(ui: &mut egui::Ui, label: &str, spec: ButtonSpec, stretch: bool) -> Response {
     let font = FontId::proportional(12.5);
     let galley = ui
         .painter()
         .layout_no_wrap(label.to_string(), font.clone(), spec.text);
-    let size = Vec2::new(galley.size().x + 24.0, 30.0);
+    let natural = galley.size().x + 24.0;
+    let width = if stretch {
+        ui.available_width()
+    } else {
+        natural.min(ui.available_width().max(48.0))
+    };
+    let size = Vec2::new(width, 30.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
     let enabled = ui.is_enabled();
@@ -69,7 +76,13 @@ fn styled_button(ui: &mut egui::Ui, label: &str, spec: ButtonSpec) -> Response {
         painter.rect_stroke(rect, theme::CORNER_BUTTON, stroke, StrokeKind::Inside);
     }
     let galley = painter.layout_no_wrap(label.to_string(), font, text_color);
-    painter.galley(rect.center() - galley.size() / 2.0, galley, text_color);
+    let text_pos = Pos2::new(
+        rect.min.x + ((rect.width() - galley.size().x) / 2.0).max(6.0),
+        rect.center().y - galley.size().y / 2.0,
+    );
+    ui.painter()
+        .with_clip_rect(rect)
+        .galley(text_pos, galley, text_color);
 
     response
 }
@@ -85,10 +98,19 @@ pub(crate) fn primary_button(ui: &mut egui::Ui, label: &str) -> Response {
             text: theme::PRIMARY_TEXT,
             hover_text: theme::PRIMARY_TEXT,
         },
+        false,
     )
 }
 
 pub(crate) fn outline_button(ui: &mut egui::Ui, label: &str) -> Response {
+    outline_button_sized(ui, label, false)
+}
+
+pub(crate) fn outline_button_fill(ui: &mut egui::Ui, label: &str) -> Response {
+    outline_button_sized(ui, label, true)
+}
+
+fn outline_button_sized(ui: &mut egui::Ui, label: &str, stretch: bool) -> Response {
     styled_button(
         ui,
         label,
@@ -99,6 +121,7 @@ pub(crate) fn outline_button(ui: &mut egui::Ui, label: &str) -> Response {
             text: theme::TEXT_DIM,
             hover_text: theme::TEXT,
         },
+        stretch,
     )
 }
 
@@ -222,11 +245,14 @@ pub(crate) fn progress_bar(ui: &mut egui::Ui, fraction: f64) {
 
 fn stat_label(ui: &mut egui::Ui, label: &str) {
     ui.vertical_centered(|ui| {
-        ui.label(
-            RichText::new(label)
-                .font(FontId::proportional(10.0))
-                .color(theme::TEXT_FAINT)
-                .strong(),
+        ui.add(
+            egui::Label::new(
+                RichText::new(label)
+                    .font(FontId::proportional(10.0))
+                    .color(theme::TEXT_FAINT)
+                    .strong(),
+            )
+            .truncate(),
         );
     });
 }
@@ -361,27 +387,18 @@ pub(crate) fn icon_button(
 }
 
 pub(crate) fn language_menu(ui: &mut egui::Ui) -> Option<deviceout_i18n::Preference> {
-    use deviceout_i18n::{Lang, Preference};
+    use deviceout_i18n::Preference;
 
     let t = deviceout_i18n::t();
     let pref = deviceout_i18n::preference();
     let current = deviceout_i18n::current();
     let mut chosen = None;
     egui::ComboBox::from_id_salt("language")
-        .selected_text(
-            RichText::new(current.native_name())
-                .font(FontId::proportional(11.0))
-                .color(theme::TEXT_DIM),
-        )
+        .selected_text(native_name_text(current, 11.0, theme::TEXT_DIM))
         .width(0.0)
         .show_ui(ui, |ui| {
-            let system = format!(
-                "{} · {}",
-                t.follow_system,
-                deviceout_i18n::system_lang().native_name()
-            );
             if ui
-                .selectable_label(pref == Preference::System, system)
+                .selectable_label(pref == Preference::System, t.follow_system)
                 .clicked()
             {
                 chosen = Some(Preference::System);
@@ -389,7 +406,10 @@ pub(crate) fn language_menu(ui: &mut egui::Ui) -> Option<deviceout_i18n::Prefere
             ui.separator();
             for lang in Lang::ALL {
                 if ui
-                    .selectable_label(pref == Preference::Fixed(lang), lang.native_name())
+                    .selectable_label(
+                        pref == Preference::Fixed(lang),
+                        native_name_text(lang, 13.0, theme::TEXT),
+                    )
                     .clicked()
                 {
                     chosen = Some(Preference::Fixed(lang));
@@ -399,6 +419,12 @@ pub(crate) fn language_menu(ui: &mut egui::Ui) -> Option<deviceout_i18n::Prefere
         .response
         .on_hover_text(t.language);
     chosen
+}
+
+fn native_name_text(lang: Lang, size: f32, color: Color32) -> RichText {
+    RichText::new(lang.native_name())
+        .font(FontId::new(size, theme::script_family(lang.script())))
+        .color(color)
 }
 
 pub(crate) fn wordmark(ui: &mut egui::Ui) {
