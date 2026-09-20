@@ -51,7 +51,9 @@ pub static STRINGS: Strings = Strings {
     update_ready: "更新 v{version} 已就緒",
     update_ready_tip: "點擊安裝，然後依提示關閉宿主",
     install_failed: "安裝失敗",
+    install_failed_tip: "關閉使用此外掛的程式，然後檢查更新並重試安裝。",
     check_failed: "檢查失敗",
+    check_failed_tip: "請檢查網路連線後重試。如果問題持續發生，請透過「回報問題」告知我們。",
     update_available: "發現新版本 v{version}",
     up_to_date: "已是最新 v{version}",
 

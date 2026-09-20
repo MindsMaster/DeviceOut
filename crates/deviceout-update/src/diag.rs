@@ -115,8 +115,12 @@ pub fn build_diagnostics(bundle: Option<&Path>, plugin_version: &str) -> String 
         let ver = crate::file_version_string(&host).unwrap_or_else(|| "-".into());
         lines.push(format!("host={name} {ver}"));
     }
-    if let Some(err) = crate::load_state().last_error {
-        lines.push(format!("last_error={err}"));
+    let state = crate::load_state();
+    if let Some(err) = state.last_error {
+        lines.push(format!("last_error={}", sanitize_user_paths(&err)));
+    }
+    if let Some(err) = state.last_install_error {
+        lines.push(format!("last_install_error={}", sanitize_user_paths(&err)));
     }
     let log_tail = tail_file(&paths::update_log_path(), 32 * 1024);
     if !log_tail.is_empty() {
@@ -262,6 +266,9 @@ mod tests {
         let out = sanitize_user_paths(s);
         assert!(!out.to_ascii_lowercase().contains("zhangsan"), "{out}");
         assert!(out.contains("%USERPROFILE%"), "{out}");
-        assert!(out.contains(r"\AppData\Local\DeviceOut\update.log"), "{out}");
+        assert!(
+            out.contains(r"\AppData\Local\DeviceOut\update.log"),
+            "{out}"
+        );
     }
 }

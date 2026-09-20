@@ -178,6 +178,46 @@ fn fault_tooltip_uses_the_localized_message_and_wraps_within_the_window() {
 }
 
 #[test]
+fn update_failure_tooltips_use_localized_guidance_in_every_language() {
+    let raw_error = "feed signature rejected: 内部错误详情";
+    for lang in deviceout_i18n::Lang::ALL {
+        let strings = lang.strings();
+        let check_failed = deviceout_update::State {
+            last_error: Some(raw_error.into()),
+            ..Default::default()
+        };
+        let (status, color, tip) = update_status_text("1.1.0", None, &check_failed, false, strings);
+        assert_eq!(status, strings.check_failed);
+        assert_eq!(color, theme::RED);
+        assert_eq!(tip.as_deref(), Some(strings.check_failed_tip));
+        assert_ne!(tip.as_deref(), Some(raw_error));
+        assert!(!strings.check_failed_tip.trim().is_empty());
+
+        let install_failed = deviceout_update::State {
+            last_install_error: Some(raw_error.into()),
+            ..check_failed
+        };
+        let (status, color, tip) =
+            update_status_text("1.1.0", None, &install_failed, false, strings);
+        assert_eq!(status, strings.install_failed);
+        assert_eq!(color, theme::RED);
+        assert_eq!(tip.as_deref(), Some(strings.install_failed_tip));
+        assert_ne!(tip.as_deref(), Some(raw_error));
+        assert!(!strings.install_failed_tip.trim().is_empty());
+
+        let (status, _, tip) = update_status_text("1.1.0", None, &install_failed, true, strings);
+        assert_eq!(status, strings.checking_status);
+        assert!(tip.is_none());
+
+        if lang != deviceout_i18n::Lang::En {
+            let english = deviceout_i18n::Lang::En.strings();
+            assert_ne!(strings.check_failed_tip, english.check_failed_tip);
+            assert_ne!(strings.install_failed_tip, english.install_failed_tip);
+        }
+    }
+}
+
+#[test]
 fn feedback_diagnostics_preserve_the_original_engine_error() {
     let snapshot = failed_snapshot();
     let diagnostics = session_diag(Some(&snapshot), "USB DAC");

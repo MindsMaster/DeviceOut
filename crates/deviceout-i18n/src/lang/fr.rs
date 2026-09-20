@@ -51,7 +51,9 @@ pub static STRINGS: Strings = Strings {
     update_ready: "Mise à jour v{version} prête",
     update_ready_tip: "Cliquez sur Installer, puis fermez l'hôte lorsque demandé",
     install_failed: "Échec de l'installation",
+    install_failed_tip: "Fermez les programmes qui utilisent le plugin, puis recherchez des mises à jour et réessayez l'installation.",
     check_failed: "Échec de la recherche",
+    check_failed_tip: "Vérifiez votre connexion Internet et réessayez. Si le problème persiste, signalez un bug.",
     update_available: "Mise à jour v{version} disponible",
     up_to_date: "À jour v{version}",
 

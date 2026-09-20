@@ -51,7 +51,9 @@ pub static STRINGS: Strings = Strings {
     update_ready: "更新 v{version} の準備ができました",
     update_ready_tip: "インストールを押し、案内に従ってホストを終了してください",
     install_failed: "インストールに失敗しました",
+    install_failed_tip: "プラグインを使用中のプログラムを終了し、更新を確認してから再度インストールしてください。",
     check_failed: "確認に失敗しました",
+    check_failed_tip: "インターネット接続を確認して再試行してください。問題が続く場合は「不具合を報告」からお知らせください。",
     update_available: "新しいバージョン v{version} があります",
     up_to_date: "最新です v{version}",
 

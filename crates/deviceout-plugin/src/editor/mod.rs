@@ -583,8 +583,10 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
         pending.as_ref(),
         &st,
         state.check_busy_since.is_some(),
+        t(),
     );
 
+    let tooltip_width = ui.available_width();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let checking = state.check_busy_since.is_some();
@@ -618,7 +620,10 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
                     .truncate(),
                 );
                 if let Some(tip) = tip {
-                    label.on_hover_text(tip);
+                    label.on_hover_ui(|ui| {
+                        ui.set_max_width(tooltip_width);
+                        ui.add(egui::Label::new(tip).wrap());
+                    });
                 }
             },
         );
@@ -684,8 +689,8 @@ fn update_status_text(
     pending: Option<&deviceout_update::PendingManifest>,
     st: &deviceout_update::State,
     busy: bool,
+    t: &Strings,
 ) -> (String, egui::Color32, Option<String>) {
-    let t = t();
     if busy {
         return (t.checking_status.into(), theme::TEXT_DIM, None);
     }
@@ -696,11 +701,19 @@ fn update_status_text(
             Some(t.update_ready_tip.into()),
         );
     }
-    if let Some(err) = st.last_install_error.as_deref() {
-        return (t.install_failed.into(), theme::RED, Some(error_tip(err)));
+    if st.last_install_error.is_some() {
+        return (
+            t.install_failed.into(),
+            theme::RED,
+            Some(t.install_failed_tip.into()),
+        );
     }
-    if let Some(err) = st.last_error.as_deref() {
-        return (t.check_failed.into(), theme::RED, Some(error_tip(err)));
+    if st.last_error.is_some() {
+        return (
+            t.check_failed.into(),
+            theme::RED,
+            Some(t.check_failed_tip.into()),
+        );
     }
     if let Some(latest) = st.last_latest.as_deref() {
         match deviceout_update::cmp_latest(latest, current) {
@@ -722,14 +735,6 @@ fn update_status_text(
         }
     }
     (format!("v{current}"), theme::TEXT_DIM, None)
-}
-
-fn error_tip(err: &str) -> String {
-    err.trim()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(160)
-        .collect()
 }
 
 fn feedback_row(

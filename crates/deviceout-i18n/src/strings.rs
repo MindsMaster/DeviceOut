@@ -50,7 +50,9 @@ pub struct Strings {
     pub update_ready: &'static str,
     pub update_ready_tip: &'static str,
     pub install_failed: &'static str,
+    pub install_failed_tip: &'static str,
     pub check_failed: &'static str,
+    pub check_failed_tip: &'static str,
     pub update_available: &'static str,
     pub up_to_date: &'static str,
 

@@ -51,7 +51,9 @@ pub static STRINGS: Strings = Strings {
     update_ready: "อัปเดต v{version} พร้อมแล้ว",
     update_ready_tip: "กดติดตั้ง แล้วปิดโฮสต์เมื่อได้รับแจ้ง",
     install_failed: "ติดตั้งไม่สำเร็จ",
+    install_failed_tip: "ปิดโปรแกรมที่ใช้ปลั๊กอิน จากนั้นตรวจหาอัปเดตแล้วลองติดตั้งอีกครั้ง",
     check_failed: "ตรวจสอบไม่สำเร็จ",
+    check_failed_tip: "ตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองอีกครั้ง หากยังพบปัญหา โปรดรายงานปัญหา",
     update_available: "มีเวอร์ชันใหม่ v{version}",
     up_to_date: "เป็นเวอร์ชันล่าสุด v{version}",
 
