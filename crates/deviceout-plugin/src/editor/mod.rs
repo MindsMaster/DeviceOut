@@ -8,7 +8,7 @@ use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::{Mutex, RwLock};
 
 use deviceout_engine::{Fault, FaultKind};
-use deviceout_i18n::{fill, t};
+use deviceout_i18n::{fill, t, Strings};
 use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
@@ -340,14 +340,17 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
 
         if let Some(fault) = snap.and_then(|s| s.error.as_ref()) {
             ui.add_space(6.0);
-            let line = widgets::alert_line(ui, theme::RED, fault_text(fault));
-            line.on_hover_text(&fault.detail);
+            let message = fault_text(fault, t());
+            let tooltip_width = ui.available_width();
+            widgets::alert_line(ui, theme::RED, &message).on_hover_ui(|ui| {
+                ui.set_max_width(tooltip_width);
+                ui.add(egui::Label::new(&message).wrap());
+            });
         }
     });
 }
 
-fn fault_text(fault: &Fault) -> String {
-    let t = t();
+fn fault_text(fault: &Fault, t: &Strings) -> String {
     let base = match fault.kind {
         FaultKind::DeviceNotFound => t.fault_device_not_found.to_string(),
         FaultKind::DeviceLost => t.fault_device_lost.to_string(),
@@ -873,7 +876,7 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         .map(|v| format!("{v:.1}"))
         .unwrap_or_else(|| format!("raw {:.1}", s.raw_drift_ppm));
     format!(
-        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\nperiod_frames={}\nsink_hz={:.0}",
+        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\nperiod_frames={}\nsink_hz={:.0}\nengine_error={}",
         s.state,
         s.fill_fraction * 100.0,
         s.underruns,
@@ -888,6 +891,9 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         s.capacity_frames,
         s.period_frames,
         s.sink_rate_hz,
+        deviceout_update::sanitize_user_paths(
+            s.error.as_ref().map_or("none", |fault| fault.detail.as_str())
+        ),
     )
 }
 

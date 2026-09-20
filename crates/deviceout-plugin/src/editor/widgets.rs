@@ -278,7 +278,13 @@ fn stat_value(ui: &mut egui::Ui, value: &str, unit: &str, color: Color32) {
     });
 }
 
-pub(crate) fn stat_cell(ui: &mut egui::Ui, label: &str, value: &str, unit: &str, color: Color32) -> Response {
+pub(crate) fn stat_cell(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &str,
+    unit: &str,
+    color: Color32,
+) -> Response {
     ui.vertical(|ui| {
         ui.set_min_width(ui.available_width());
         stat_label(ui, label);
@@ -354,11 +360,11 @@ fn refresh_icon(painter: &egui::Painter, center: Pos2, radius: f32, color: Color
     }
 }
 
-pub(crate) fn alert_line(ui: &mut egui::Ui, color: Color32, text: String) -> Response {
+pub(crate) fn alert_line(ui: &mut egui::Ui, color: Color32, text: &str) -> Response {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 14.0), Sense::hover());
         ui.painter().circle_filled(rect.center(), 2.5, color);
-        ui.label(RichText::new(text).size(11.5).color(theme::TEXT_DIM))
+        ui.add(egui::Label::new(RichText::new(text).size(11.5).color(theme::TEXT_DIM)).wrap())
     })
     .inner
 }
