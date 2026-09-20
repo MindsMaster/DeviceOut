@@ -15,6 +15,8 @@ use deviceout_update::outbox::FeedbackKind;
 use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, RING_FRAME_STEPS};
 
 mod fonts;
+#[cfg(test)]
+mod tests;
 mod theme;
 mod widgets;
 #[cfg(windows)]
@@ -176,7 +178,8 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
                                 });
                         });
                     if let Some((at, text, color)) = state.send_note.as_ref() {
-                        let keep = state.send_watch.is_some() || at.elapsed() < Duration::from_secs(4);
+                        let keep =
+                            state.send_watch.is_some() || at.elapsed() < Duration::from_secs(4);
                         if keep {
                             widgets::toast(ctx, text, *color);
                         }
@@ -287,39 +290,52 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
             });
 
         ui.horizontal(|ui| {
-            let button_width = 34.0;
-            let combo_width = (ui.available_width() - button_width - 8.0).max(120.0);
-
-            let mut chosen: Option<String> = None;
-            egui::ComboBox::from_id_salt("device")
-                .selected_text(egui::RichText::new(current_name).size(13.0))
-                .width(combo_width)
-                .show_ui(ui, |ui| {
-                    for device in w.devices.read().iter() {
-                        let label = if device.is_default {
-                            format!("{} · {}", device.name, t().system_default)
-                        } else {
-                            device.name.clone()
-                        };
-                        if ui
-                            .selectable_label(device.id == current_id, label)
-                            .clicked()
-                        {
-                            chosen = Some(device.id.clone());
-                        }
-                    }
-                });
-
-            if widgets::refresh_button(ui).clicked() {
-                *w.devices.write() = enumerate_devices();
-            }
-
-            if let Some(id) = chosen {
-                if id != current_id {
-                    *w.params.device_id.write() = id.clone();
-                    w.engine.set_device_async(id);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::refresh_button(ui).clicked() {
+                    *w.devices.write() = enumerate_devices();
                 }
-            }
+
+                let combo_width = ui.available_width();
+                let mut chosen: Option<String> = None;
+                egui::ComboBox::from_id_salt("device")
+                    .selected_text(egui::RichText::new(&current_name).size(13.0))
+                    .width(combo_width)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        ui.set_max_width(combo_width);
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
+                        for device in w.devices.read().iter() {
+                            let label = if device.is_default {
+                                format!("{} · {}", device.name, t().system_default)
+                            } else {
+                                device.name.clone()
+                            };
+                            if ui
+                                .selectable_label(device.id == current_id, &label)
+                                .on_hover_ui(|ui| {
+                                    ui.set_max_width(combo_width);
+                                    ui.add(egui::Label::new(&device.name).wrap());
+                                })
+                                .clicked()
+                            {
+                                chosen = Some(device.id.clone());
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_ui(|ui| {
+                        ui.set_max_width(combo_width);
+                        ui.add(egui::Label::new(&current_name).wrap());
+                    });
+
+                if let Some(id) = chosen {
+                    if id != current_id {
+                        *w.params.device_id.write() = id.clone();
+                        w.engine.set_device_async(id);
+                    }
+                }
+            });
         });
 
         if let Some(fault) = snap.and_then(|s| s.error.as_ref()) {
@@ -396,34 +412,38 @@ fn allowed_ring_steps(floor: u32) -> &'static [u32] {
 fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.columns(3, |cols| {
-            match snap {
-                Some(s) => {
-                    widgets::stat_cell(
-                        &mut cols[0],
-                        t().heading_latency,
-                        &format!("{:.0}", s.latency_ms),
-                        "ms",
-                        theme::TEXT,
-                    );
-                    let (drift, drift_color) = match s.drift_ppm {
-                        Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT),
-                        None => (format!("{:+.0}…", s.raw_drift_ppm), theme::TEXT_DIM),
-                    };
-                    widgets::stat_cell(&mut cols[1], t().heading_drift, &drift, "ppm", drift_color);
-                    widgets::stat_cell(
-                        &mut cols[2],
-                        t().heading_format,
-                        &format!("{:.1}", s.sink_rate_hz / 1000.0),
-                        "kHz",
-                        theme::TEXT,
-                    );
-                }
-                None => {
-                    widgets::stat_cell(&mut cols[0], t().heading_latency, "—", "", theme::TEXT_FAINT);
-                    widgets::stat_cell(&mut cols[1], t().heading_drift, "—", "", theme::TEXT_FAINT);
-                    widgets::stat_cell(&mut cols[2], t().heading_format, "—", "", theme::TEXT_FAINT);
-                }
+        ui.columns(3, |cols| match snap {
+            Some(s) => {
+                widgets::stat_cell(
+                    &mut cols[0],
+                    t().heading_latency,
+                    &format!("{:.0}", s.latency_ms),
+                    "ms",
+                    theme::TEXT,
+                );
+                let (drift, drift_color) = match s.drift_ppm {
+                    Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT),
+                    None => (format!("{:+.0}…", s.raw_drift_ppm), theme::TEXT_DIM),
+                };
+                widgets::stat_cell(&mut cols[1], t().heading_drift, &drift, "ppm", drift_color);
+                widgets::stat_cell(
+                    &mut cols[2],
+                    t().heading_format,
+                    &format!("{:.1}", s.sink_rate_hz / 1000.0),
+                    "kHz",
+                    theme::TEXT,
+                );
+            }
+            None => {
+                widgets::stat_cell(
+                    &mut cols[0],
+                    t().heading_latency,
+                    "—",
+                    "",
+                    theme::TEXT_FAINT,
+                );
+                widgets::stat_cell(&mut cols[1], t().heading_drift, "—", "", theme::TEXT_FAINT);
+                widgets::stat_cell(&mut cols[2], t().heading_format, "—", "", theme::TEXT_FAINT);
             }
         });
     });
@@ -809,11 +829,7 @@ fn poll_prompt(state: &mut EditorUi) {
         Ok(id) => {
             deviceout_update::spawn_updater(&[OsStr::new("--send-outbox")]);
             state.send_watch = Some((id, Instant::now()));
-            state.send_note = Some((
-                Instant::now(),
-                t().sending.into(),
-                theme::TEXT_DIM,
-            ));
+            state.send_note = Some((Instant::now(), t().sending.into(), theme::TEXT_DIM));
         }
         Err(msg) => {
             state.send_watch = None;
@@ -830,29 +846,17 @@ fn poll_send(state: &mut EditorUi) {
     let elapsed = since.elapsed();
     if outbox_file(&deviceout_update::sent_dir(), &id).is_file() {
         state.send_watch = None;
-        state.send_note = Some((
-            Instant::now(),
-            t().sent.into(),
-            theme::GREEN,
-        ));
+        state.send_note = Some((Instant::now(), t().sent.into(), theme::GREEN));
         return;
     }
     if outbox_file(&deviceout_update::failed_dir(), &id).is_file() {
         state.send_watch = None;
-        state.send_note = Some((
-            Instant::now(),
-            t().send_failed.into(),
-            theme::RED,
-        ));
+        state.send_note = Some((Instant::now(), t().send_failed.into(), theme::RED));
         return;
     }
     if elapsed >= Duration::from_secs(25) {
         state.send_watch = None;
-        state.send_note = Some((
-            Instant::now(),
-            t().saved_will_retry.into(),
-            theme::AMBER,
-        ));
+        state.send_note = Some((Instant::now(), t().saved_will_retry.into(), theme::AMBER));
     }
 }
 
