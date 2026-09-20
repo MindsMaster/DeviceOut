@@ -295,39 +295,20 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
                     *w.devices.write() = enumerate_devices();
                 }
 
-                let combo_width = ui.available_width();
                 let mut chosen: Option<String> = None;
-                egui::ComboBox::from_id_salt("device")
-                    .selected_text(egui::RichText::new(&current_name).size(13.0))
-                    .width(combo_width)
-                    .truncate()
-                    .show_ui(ui, |ui| {
-                        ui.set_max_width(combo_width);
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-
-                        for device in w.devices.read().iter() {
-                            let label = if device.is_default {
-                                format!("{} · {}", device.name, t().system_default)
-                            } else {
-                                device.name.clone()
-                            };
-                            if ui
-                                .selectable_label(device.id == current_id, &label)
-                                .on_hover_ui(|ui| {
-                                    ui.set_max_width(combo_width);
-                                    ui.add(egui::Label::new(&device.name).wrap());
-                                })
-                                .clicked()
-                            {
-                                chosen = Some(device.id.clone());
-                            }
+                widgets::device_picker(ui, &current_name, |ui| {
+                    for device in w.devices.read().iter() {
+                        let label = if device.is_default {
+                            format!("{} · {}", device.name, t().system_default)
+                        } else {
+                            device.name.clone()
+                        };
+                        if widgets::device_option(ui, &label, device.id == current_id).clicked() {
+                            chosen = Some(device.id.clone());
+                            ui.memory_mut(|memory| memory.close_popup());
                         }
-                    })
-                    .response
-                    .on_hover_ui(|ui| {
-                        ui.set_max_width(combo_width);
-                        ui.add(egui::Label::new(&current_name).wrap());
-                    });
+                    }
+                });
 
                 if let Some(id) = chosen {
                     if id != current_id {

@@ -315,13 +315,212 @@ fn value_width(ui: &egui::Ui, value: &str, unit: &str) -> f32 {
     v.x + u
 }
 
-pub(crate) fn refresh_button(ui: &mut egui::Ui) -> Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
-    let painter = ui.painter();
-
-    if response.hovered() {
-        painter.rect_filled(rect, theme::CORNER_SMALL, theme::WIDGET_HOVER);
+pub(crate) fn device_picker(
+    ui: &mut egui::Ui,
+    label: &str,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> Response {
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), label)
+    });
+    let popup_id = ui.make_persistent_id("device_menu");
+    if response.clicked() {
+        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
     }
+    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        label.to_string(),
+        FontId::proportional(13.0),
+        theme::TEXT,
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: (width - 44.0).max(1.0),
+        max_rows: 1,
+        break_anywhere: true,
+        ..Default::default()
+    };
+    let galley = ui.painter().layout_job(job);
+    let truncated = galley.elided;
+    let fill = if response.hovered() {
+        theme::WIDGET
+    } else {
+        theme::CARD
+    };
+    let border = if response.has_focus() {
+        theme::TEXT_DIM
+    } else if open || response.hovered() {
+        theme::MENU_BORDER
+    } else {
+        theme::OUTLINE
+    };
+    ui.painter().rect(
+        rect,
+        theme::CORNER_BUTTON,
+        fill,
+        Stroke::new(1.0_f32, border),
+        StrokeKind::Inside,
+    );
+    let text_pos = Pos2::new(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(text_pos, galley, theme::TEXT);
+    let center = Pos2::new(rect.right() - 16.0, rect.center().y);
+    let direction = if open { -1.0 } else { 1.0 };
+    ui.painter().add(Shape::line(
+        vec![
+            center + Vec2::new(-3.5, -1.75 * direction),
+            center + Vec2::new(0.0, 1.75 * direction),
+            center + Vec2::new(3.5, -1.75 * direction),
+        ],
+        Stroke::new(1.5_f32, theme::TEXT_DIM),
+    ));
+
+    if open {
+        let gap = 5.0;
+        let screen = ui.ctx().screen_rect();
+        let below = (screen.bottom() - rect.bottom() - gap - 8.0).max(0.0);
+        let above = (rect.top() - screen.top() - gap - 8.0).max(0.0);
+        let placement = if below >= 294.0 || below >= above {
+            egui::AboveOrBelow::Below
+        } else {
+            egui::AboveOrBelow::Above
+        };
+        let available_height = match placement {
+            egui::AboveOrBelow::Below => below,
+            egui::AboveOrBelow::Above => above,
+        };
+        let mut anchor = response.clone();
+        anchor.rect = rect.expand2(Vec2::new(0.0, gap));
+        ui.scope(|ui| {
+            let style = ui.style_mut();
+            style.spacing.menu_margin = egui::Margin::same(6);
+            style.visuals.window_fill = theme::MENU;
+            style.visuals.window_stroke = Stroke::new(1.0_f32, theme::MENU_BORDER);
+            style.visuals.menu_corner_radius = theme::CORNER;
+            style.visuals.popup_shadow = egui::epaint::Shadow {
+                offset: [0, 6],
+                blur: 20,
+                spread: 2,
+                color: Color32::from_black_alpha(100),
+            };
+            egui::popup::popup_above_or_below_widget(
+                ui,
+                popup_id,
+                &anchor,
+                placement,
+                egui::PopupCloseBehavior::CloseOnClickOutside,
+                |ui| {
+                    ui.set_width((width - 14.0).max(1.0));
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    let mut scroll = egui::style::ScrollStyle::floating();
+                    scroll.bar_width = 6.0;
+                    scroll.floating_width = 3.0;
+                    scroll.floating_allocated_width = 8.0;
+                    scroll.handle_min_length = 32.0;
+                    scroll.dormant_handle_opacity = 0.25;
+                    scroll.active_handle_opacity = 0.35;
+                    scroll.interact_handle_opacity = 0.65;
+                    scroll.active_background_opacity = 0.0;
+                    scroll.interact_background_opacity = 0.0;
+                    ui.spacing_mut().scroll = scroll;
+                    egui::ScrollArea::vertical()
+                        .max_height((available_height - 14.0).clamp(1.0, 280.0))
+                        .auto_shrink([false, true])
+                        .show(ui, add_contents);
+                },
+            );
+        });
+    } else if truncated {
+        return response.on_hover_ui(|ui| {
+            ui.set_max_width(width);
+            ui.add(egui::Label::new(label).wrap());
+        });
+    }
+
+    response
+}
+
+pub(crate) fn device_option(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
+    let width = ui.available_width();
+    let text_offset = 10.0;
+    let galley = ui.painter().layout(
+        label.to_string(),
+        FontId::proportional(13.0),
+        theme::TEXT,
+        (width - text_offset - 30.0).max(1.0),
+    );
+    let height = (galley.size().y + 16.0).max(34.0);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let fill = if response.hovered() || response.is_pointer_button_down_on() {
+            theme::MENU_HOVER
+        } else if selected {
+            theme::MENU_SELECTED
+        } else {
+            Color32::TRANSPARENT
+        };
+        painter.rect_filled(rect, theme::CORNER_SMALL, fill);
+        if response.has_focus() {
+            painter.rect_stroke(
+                rect.shrink(1.0),
+                theme::CORNER_SMALL,
+                Stroke::new(1.0_f32, theme::TEXT_DIM),
+                StrokeKind::Inside,
+            );
+        }
+        if selected {
+            let center = Pos2::new(rect.right() - 14.0, rect.center().y);
+            painter.add(Shape::line(
+                vec![
+                    center + Vec2::new(-4.0, 0.0),
+                    center + Vec2::new(-1.0, 3.0),
+                    center + Vec2::new(5.0, -4.0),
+                ],
+                Stroke::new(1.6_f32, theme::TEXT),
+            ));
+        }
+        let text_pos = Pos2::new(
+            rect.left() + text_offset,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        painter.galley(text_pos, galley, theme::TEXT);
+    }
+
+    response
+}
+
+pub(crate) fn refresh_button(ui: &mut egui::Ui) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
+    let painter = ui.painter();
+    let fill = if response.hovered() {
+        theme::WIDGET
+    } else {
+        theme::CARD
+    };
+    let border = if response.has_focus() {
+        theme::TEXT_DIM
+    } else if response.hovered() {
+        theme::MENU_BORDER
+    } else {
+        theme::OUTLINE
+    };
+    painter.rect(
+        rect,
+        theme::CORNER_BUTTON,
+        fill,
+        Stroke::new(1.0_f32, border),
+        StrokeKind::Inside,
+    );
 
     let color = if response.hovered() {
         theme::TEXT

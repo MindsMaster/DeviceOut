@@ -13,6 +13,11 @@ pub(crate) const WIDGET_HOVER: Color32 = Color32::from_rgb(39, 39, 42);
 pub(crate) const BORDER: Color32 = Color32::from_rgb(35, 35, 41);
 pub(crate) const OUTLINE: Color32 = Color32::from_rgb(39, 39, 42);
 
+pub(crate) const MENU: Color32 = Color32::from_rgb(24, 24, 28);
+pub(crate) const MENU_BORDER: Color32 = Color32::from_rgb(51, 51, 58);
+pub(crate) const MENU_SELECTED: Color32 = Color32::from_rgb(32, 32, 38);
+pub(crate) const MENU_HOVER: Color32 = Color32::from_rgb(43, 43, 50);
+
 pub(crate) const TEXT: Color32 = Color32::from_rgb(244, 244, 245);
 pub(crate) const TEXT_DIM: Color32 = Color32::from_rgb(161, 161, 170);
 pub(crate) const TEXT_FAINT: Color32 = Color32::from_rgb(113, 113, 122);
@@ -111,12 +116,14 @@ pub(crate) fn install_fonts(ctx: &egui::Context, script: deviceout_i18n::Script)
     super::win_prompt::ensure_noto_gdi();
 
     let mut fonts = egui::FontDefinitions::default();
-    fonts
-        .font_data
-        .insert(fonts::NAME_SANS.into(), FontData::from_static(fonts::NOTO_SANS).into());
-    fonts
-        .font_data
-        .insert(fonts::NAME_THAI.into(), FontData::from_static(fonts::NOTO_THAI).into());
+    fonts.font_data.insert(
+        fonts::NAME_SANS.into(),
+        FontData::from_static(fonts::NOTO_SANS).into(),
+    );
+    fonts.font_data.insert(
+        fonts::NAME_THAI.into(),
+        FontData::from_static(fonts::NOTO_THAI).into(),
+    );
     for (name, index) in fonts::cjk_faces() {
         fonts
             .font_data
@@ -130,9 +137,10 @@ pub(crate) fn install_fonts(ctx: &egui::Context, script: deviceout_i18n::Script)
         deviceout_i18n::Script::Korean,
         deviceout_i18n::Script::Thai,
     ] {
-        fonts
-            .families
-            .insert(fonts::script_family(script), fonts::named_family_chain(script));
+        fonts.families.insert(
+            fonts::script_family(script),
+            fonts::named_family_chain(script),
+        );
     }
 
     let ui = fonts::ui_chain(script);
