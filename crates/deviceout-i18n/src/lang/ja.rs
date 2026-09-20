@@ -17,9 +17,9 @@ pub static STRINGS: Strings = Strings {
     heading_format: "フォーマット",
     heading_buffer_size: "バッファーサイズ",
     mix_format: "{rate} Hz / {channels} ch / {sample}",
-    sample_f32: "32-bit float",
-    sample_i16: "16-bit int",
-    sample_i32: "32-bit int",
+    sample_f32: "32ビット浮動小数点",
+    sample_i16: "16ビット整数",
+    sample_i32: "32ビット整数",
 
     state_running: "動作中",
     state_priming: "準備中",

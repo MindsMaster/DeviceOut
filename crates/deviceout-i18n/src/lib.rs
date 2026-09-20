@@ -124,8 +124,14 @@ impl Lang {
         match language {
             "en" => Some(Lang::En),
             "zh" => {
-                let traditional = rest.iter().any(|p| matches!(*p, "hant" | "tw" | "hk" | "mo"));
-                Some(if traditional { Lang::ZhHant } else { Lang::ZhHans })
+                let traditional = rest
+                    .iter()
+                    .any(|p| matches!(*p, "hant" | "tw" | "hk" | "mo"));
+                Some(if traditional {
+                    Lang::ZhHant
+                } else {
+                    Lang::ZhHans
+                })
             }
             "ja" => Some(Lang::Ja),
             "ko" => Some(Lang::Ko),
@@ -140,7 +146,10 @@ impl Lang {
     }
 
     fn code(self) -> u8 {
-        Lang::ALL.iter().position(|l| *l == self).map_or(0, |i| i as u8 + 1)
+        Lang::ALL
+            .iter()
+            .position(|l| *l == self)
+            .map_or(0, |i| i as u8 + 1)
     }
 
     fn from_code(code: u8) -> Option<Lang> {
@@ -298,12 +307,27 @@ mod tests {
             let s = lang.strings();
             for (name, get) in templates {
                 for key in placeholders(get(en)) {
-                    assert!(
-                        get(s).contains(&key),
-                        "{} {name} lacks {key}",
-                        lang.tag()
-                    );
+                    assert!(get(s).contains(&key), "{} {name} lacks {key}", lang.tag());
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn sample_formats_are_translated_in_every_non_english_language() {
+        let english = Lang::En.strings();
+        for lang in Lang::ALL {
+            if lang == Lang::En {
+                continue;
+            }
+            let strings = lang.strings();
+            for (translated, original) in [
+                (strings.sample_f32, english.sample_f32),
+                (strings.sample_i16, english.sample_i16),
+                (strings.sample_i32, english.sample_i32),
+            ] {
+                assert!(!translated.trim().is_empty(), "{}", lang.tag());
+                assert_ne!(translated, original, "{}: {original}", lang.tag());
             }
         }
     }
