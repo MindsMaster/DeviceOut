@@ -617,7 +617,7 @@ checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
 name = "deviceout-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "rtrb",
  "rubato",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-engine"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "deviceout-core",
  "deviceout-sink",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-feedback-ingest"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-i18n"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "deviceout-update",
  "windows-sys 0.61.2",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-plugin"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "deviceout-core",
  "deviceout-engine",
@@ -668,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-sink"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "deviceout-core",
  "windows 0.62.2",
@@ -676,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-update"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "ed25519-dalek",
  "semver",
@@ -688,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "deviceout-updater"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "deviceout-i18n",
@@ -3418,7 +3418,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "deviceout-update",
