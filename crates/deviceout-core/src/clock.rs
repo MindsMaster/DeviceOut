@@ -18,15 +18,14 @@ impl Default for DriftTuning {
 }
 
 const LOWPASS_BANDWIDTH_RATIO: f64 = 5.0;
-pub const MAX_DRIFT_PPM: f64 = 5_000.0;
 
 fn max_lowpass_tau_s(wn: f64) -> f64 {
     1.0 / (LOWPASS_BANDWIDTH_RATIO * wn)
 }
 
-fn integral_limit(ki: f64) -> f64 {
+fn integral_limit(ki: f64, max_correction: f64) -> f64 {
     if ki > 0.0 {
-        MAX_DRIFT_PPM * 1.0e-6 / ki
+        max_correction / ki
     } else {
         0.0
     }
@@ -68,7 +67,7 @@ impl DriftController {
             target_frames,
             ki,
             kp: 2.0 * tuning.damping * wn / g,
-            integral_limit: integral_limit(ki),
+            integral_limit: integral_limit(ki, tuning.max_correction),
             lowpass_tau_s: max_lowpass_tau_s(wn).min(tuning.lowpass_tau_s),
             max_correction: tuning.max_correction,
             nominal_ratio,
@@ -231,25 +230,32 @@ mod tests {
     }
 
     #[test]
-    fn the_drift_estimate_stays_inside_the_plausible_band() {
-        let r = simulate(20_000.0, 600.0, true);
-        assert!(
-            r.settled_ppm.abs() <= MAX_DRIFT_PPM + 1.0,
-            "积分绕出了可信区间: {r:?}"
-        );
-
-        let ok = simulate(1_000.0, 600.0, true);
-        assert!(
-            (ok.settled_ppm - 1_000.0).abs() < 20.0,
-            "区间之内的真实漂移仍应照常跟踪: {ok:?}"
-        );
+    fn a_virtual_cable_off_by_most_of_a_percent_is_still_tracked() {
+        for ppm in [1_000.0, 8_000.0, -8_000.0] {
+            let r = simulate(ppm, 600.0, true);
+            assert_eq!(r.underruns, 0, "{ppm} ppm 出现欠载: {r:?}");
+            assert_eq!(r.overruns, 0, "{ppm} ppm 出现溢出: {r:?}");
+            assert!(
+                (r.settled_ppm - ppm).abs() < ppm.abs() * 0.05 + 20.0,
+                "{ppm} ppm 未被跟踪上: {r:?}"
+            );
+        }
     }
 
     #[test]
-    fn a_seed_beyond_the_band_is_pulled_back() {
-        let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, DriftTuning::default());
+    fn the_integral_never_outruns_the_correction_authority() {
+        let tuning = DriftTuning::default();
+        let ceiling = tuning.max_correction * 1.0e6;
+
+        let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, tuning);
         ctrl.seed_drift_ppm(50_000.0);
-        assert!(ctrl.drift_ppm() <= MAX_DRIFT_PPM + 1.0);
+        assert!(ctrl.drift_ppm() <= ceiling + 1.0);
+
+        let r = simulate(60_000.0, 600.0, true);
+        assert!(
+            r.settled_ppm.abs() <= ceiling + 1.0,
+            "积分绕过了修正上限: {r:?}"
+        );
     }
 
     #[test]
