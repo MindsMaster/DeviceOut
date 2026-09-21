@@ -60,6 +60,10 @@ pub fn ensure_telemetry_id() -> Option<String> {
     update_ui_json(ensure_id).ok()
 }
 
+pub fn ping_interval() -> i64 {
+    gap(&load_ui_json())
+}
+
 pub fn should_ping(ui: &UiJson, now: i64) -> bool {
     if within(ui.last_ping_try_unix, now, RETRY_GAP_SECS) {
         return false;

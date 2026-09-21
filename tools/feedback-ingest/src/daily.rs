@@ -111,6 +111,7 @@ mod tests {
             arch: "x86_64".into(),
             locale: "zh-CN".into(),
             tz: "China Standard Time".into(),
+            interval: 300,
         }
     }
 

@@ -5,8 +5,11 @@ use crate::index::{Device, Index};
 use crate::store::{pings_file, ticket_count};
 use crate::util::{day_key, day_start, hour_label, hour_start, parse_iso_ts, OTHER, UNKNOWN};
 
-pub const ONLINE_WINDOW_SECS: u64 = 15 * 60;
+pub const LEGACY_PING_INTERVAL_SECS: u64 = 15 * 60;
 pub const ACTIVE_WINDOW_SECS: u64 = 30 * 86_400;
+const ONLINE_FACTOR: u64 = 3;
+const ONLINE_MIN_SECS: u64 = 15 * 60;
+const ONLINE_MAX_SECS: u64 = 60 * 60;
 const TREND_HOURS: u64 = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,10 +77,7 @@ pub fn compute_stats(
     window: Window,
 ) -> DashStats {
     let devices = index.devices();
-    let online = devices
-        .values()
-        .filter(|d| now.saturating_sub(d.last_seen) < ONLINE_WINDOW_SECS)
-        .count();
+    let online = devices.values().filter(|d| is_online(d, now)).count();
     let active = devices
         .values()
         .filter(|d| now.saturating_sub(d.last_seen) <= ACTIVE_WINDOW_SECS)
@@ -114,6 +114,18 @@ pub fn compute_stats(
         regions: top_n(regions, 12),
         os: top_n(os, 8),
     }
+}
+
+pub fn online_window(device: &Device) -> u64 {
+    let interval = match device.interval_secs {
+        0 => LEGACY_PING_INTERVAL_SECS,
+        secs => secs.clamp(60, 3_600),
+    };
+    (interval * ONLINE_FACTOR).clamp(ONLINE_MIN_SECS, ONLINE_MAX_SECS)
+}
+
+fn is_online(device: &Device, now: u64) -> bool {
+    now.saturating_sub(device.last_seen) < online_window(device)
 }
 
 fn trend(dir: &Path, now: u64, offset_min: i32) -> (Vec<String>, Vec<u32>) {
@@ -216,6 +228,7 @@ mod tests {
             arch: "x86_64".into(),
             locale: locale.into(),
             tz: String::new(),
+            interval: 0,
         }
     }
 
@@ -256,14 +269,42 @@ mod tests {
     }
 
     #[test]
-    fn online_counts_only_the_last_quarter_hour() {
+    fn online_follows_each_client_own_cadence() {
         let dir = temp("stats-online");
+        let mut index = Index::load(&dir, NOW);
+        let mut fast = ping("fast", "zh-CN", "Windows 11");
+        fast.interval = 300;
+        index.record(&fast, "1.1.1.1", NOW - 60);
+        index.record(&ping("legacy", "zh-CN", "Windows 11"), "1.1.1.2", NOW - 60);
+
+        assert_eq!(online_window(&index.devices()["fast"]), 900);
+        assert_eq!(online_window(&index.devices()["legacy"]), 2_700);
+
+        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::All).online, 2);
+        assert_eq!(compute_stats(&index, &dir, NOW + 1_000, 0, Window::All).online, 1);
+        assert_eq!(compute_stats(&index, &dir, NOW + 3_000, 0, Window::All).online, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_silly_interval_cannot_stretch_the_online_window() {
+        let huge = Device {
+            interval_secs: u64::MAX,
+            ..Device::default()
+        };
+        assert_eq!(online_window(&huge), ONLINE_MAX_SECS);
+        let tiny = Device {
+            interval_secs: 1,
+            ..Device::default()
+        };
+        assert_eq!(online_window(&tiny), ONLINE_MIN_SECS);
+    }
+
+    #[test]
+    fn the_active_window_still_counts_a_month() {
+        let dir = temp("stats-active");
         let index = seeded(&dir);
-        let stats = compute_stats(&index, &dir, NOW, 0, Window::Days(30));
-        assert_eq!(stats.online, 1);
-        assert_eq!(stats.active, 3);
-        let later = compute_stats(&index, &dir, NOW + ONLINE_WINDOW_SECS, 0, Window::Days(30));
-        assert_eq!(later.online, 0);
+        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::Days(30)).active, 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

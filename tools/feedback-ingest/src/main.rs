@@ -138,7 +138,8 @@ mod tests {
     use util::b64;
 
     const ADMIN: &str = "abcdefghijklmnop";
-    const PING: &str = r#"{"telemetry_id":"abc123","version":"1.1.1","os":"Windows 11 26100","arch":"x86_64","locale":"zh-CN","tz":"China Standard Time"}"#;
+    const LEGACY_PING: &str = r#"{"telemetry_id":"abc123","version":"1.0.0","os":"Windows 11 26100","arch":"x86_64","locale":"zh-CN","tz":"China Standard Time"}"#;
+    const MODERN_PING: &str = r#"{"telemetry_id":"def456","version":"1.1.2","os":"Windows 11 26100","arch":"x86_64","locale":"zh-CN","tz":"China Standard Time","interval":300}"#;
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("fb-{name}-{}", std::process::id()));
@@ -184,11 +185,15 @@ mod tests {
     }
 
     fn post_ping(addr: SocketAddr, token: &str) -> String {
+        post_body(addr, token, LEGACY_PING)
+    }
+
+    fn post_body(addr: SocketAddr, token: &str, body: &str) -> String {
         talk(
             addr,
             &format!(
-                "POST /ping HTTP/1.1\r\nHost: a\r\nX-DeviceOut-Token: {token}\r\nContent-Length: {}\r\n\r\n{PING}",
-                PING.len()
+                "POST /ping HTTP/1.1\r\nHost: a\r\nX-DeviceOut-Token: {token}\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
             ),
         )
     }
@@ -226,6 +231,29 @@ mod tests {
 
         let log = std::fs::read_to_string(pings_file(&dir, now_epoch())).unwrap();
         assert_eq!(log.lines().count(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_client_from_before_this_change_is_still_counted() {
+        let dir = temp("route-legacy");
+        let addr = start(&dir, 100);
+        assert!(post_body(addr, "tok", LEGACY_PING).starts_with("HTTP/1.1 200 OK"));
+        assert!(post_body(addr, "tok", MODERN_PING).starts_with("HTTP/1.1 200 OK"));
+
+        let data = dashboard(addr, "");
+        assert_eq!(data["users"], 2);
+        assert_eq!(data["online"], 2);
+        assert_eq!(data["versions"]["labels"][0], "1.0.0");
+        assert_eq!(data["versions"]["labels"][1], "1.1.2");
+
+        let snapshot: serde_json::Value = {
+            let mut idx = Index::load(&dir, now_epoch());
+            idx.flush(&dir, true);
+            serde_json::from_slice(&std::fs::read(index::snapshot_path(&dir)).unwrap()).unwrap()
+        };
+        assert_eq!(snapshot["devices"]["abc123"]["interval_secs"], 0);
+        assert_eq!(snapshot["devices"]["def456"]["interval_secs"], 300);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

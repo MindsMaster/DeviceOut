@@ -62,6 +62,8 @@ pub struct PingPayload {
     pub locale: String,
     #[serde(default)]
     pub tz: String,
+    #[serde(default)]
+    pub interval: u64,
 }
 
 pub fn list_tickets(dir: &Path) -> Vec<String> {
@@ -221,6 +223,7 @@ pub fn store_ping(dir: &Path, ping: &PingPayload, ip: &str, now: u64) -> std::io
         "arch": ping.arch,
         "locale": ping.locale,
         "tz": ping.tz,
+        "interval": ping.interval,
         "ip": ip,
     })
     .to_string();

@@ -22,6 +22,7 @@ pub fn run(plugin_version: Option<&str>) {
         "arch": std::env::consts::ARCH,
         "locale": locale,
         "tz": tz,
+        "interval": telemetry::ping_interval(),
     });
     let Ok(encoded) = serde_json::to_vec(&body) else {
         return;

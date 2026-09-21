@@ -30,6 +30,8 @@ pub struct Device {
     #[serde(default)]
     pub ip: String,
     #[serde(default)]
+    pub interval_secs: u64,
+    #[serde(default)]
     pub pings: u64,
 }
 
@@ -94,6 +96,9 @@ impl Index {
         keep(&mut entry.locale, &ping.locale);
         keep(&mut entry.tz, &ping.tz);
         keep(&mut entry.ip, ip);
+        if ping.interval > 0 {
+            entry.interval_secs = ping.interval;
+        }
         self.saved_at = self.saved_at.max(at);
         self.dirty = true;
         self.evict();
@@ -206,6 +211,7 @@ fn parse_line(line: &str) -> Option<(PingPayload, String, u64)> {
         arch: field("arch"),
         locale: field("locale"),
         tz: field("tz"),
+        interval: v.get("interval").and_then(|x| x.as_u64()).unwrap_or(0),
     };
     Some((ping, field("ip"), at))
 }
@@ -223,6 +229,7 @@ mod tests {
             arch: "x86_64".into(),
             locale: "zh-CN".into(),
             tz: "China Standard Time".into(),
+            interval: 300,
         }
     }
 
