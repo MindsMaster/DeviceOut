@@ -18,6 +18,7 @@ pub struct EngineConfig {
     pub max_block_frames: usize,
     pub target_ms: f64,
     pub device_buffer_ms: u32,
+    pub device_queue_periods: u32,
     pub prime_timeout_s: f64,
     pub tuning: DriftTuning,
 }
@@ -31,6 +32,7 @@ impl Default for EngineConfig {
             max_block_frames: DEFAULT_BLOCK_FRAMES,
             target_ms: DEFAULT_TARGET_MS,
             device_buffer_ms: 40,
+            device_queue_periods: deviceout_sink::MIN_QUEUE_PERIODS,
             prime_timeout_s: 5.0,
             tuning: DriftTuning::default(),
         }
@@ -116,7 +118,11 @@ impl Drop for EngineHandle {
 #[cfg(windows)]
 pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
     start_with(consumer, config, |cfg: &EngineConfig| {
-        deviceout_sink::WasapiSink::open(&cfg.device_id, cfg.device_buffer_ms)
+        deviceout_sink::WasapiSink::open(
+            &cfg.device_id,
+            cfg.device_buffer_ms,
+            cfg.device_queue_periods,
+        )
     })
 }
 

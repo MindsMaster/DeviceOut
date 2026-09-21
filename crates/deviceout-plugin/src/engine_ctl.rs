@@ -11,6 +11,8 @@ use deviceout_engine::{
 
 pub(crate) const DEFAULT_TARGET_MS: u32 = 30;
 pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 50, 80, 120];
+pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[2, 3, 4];
+pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 2;
 
 const ASSUMED_PERIOD_MS: f64 = 10.0;
 
@@ -58,6 +60,7 @@ pub(crate) struct EngineController {
     metrics: RwLock<Option<Arc<EngineMetrics>>>,
     target_ms: AtomicU32,
     target_floor_ms: AtomicU32,
+    queue_periods: AtomicU32,
 }
 
 impl EngineController {
@@ -77,10 +80,16 @@ impl EngineController {
         self.target_ms.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn queue_periods(&self) -> u32 {
+        self.queue_periods.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn initialize(&self, config: EngineConfig, target_ms: u32, floor_ms: u32) -> u32 {
         let ms = clamp_target_ms(target_ms, floor_ms);
         self.target_floor_ms.store(floor_ms, Ordering::Relaxed);
         self.target_ms.store(ms, Ordering::Relaxed);
+        self.queue_periods
+            .store(clamp_queue_periods(config.device_queue_periods), Ordering::Relaxed);
 
         let mut producer = self.producer.lock();
         let mut slot = self.slot.lock();
@@ -124,6 +133,26 @@ impl EngineController {
             .name("deviceout-resize".into())
             .spawn(move || ctl.set_target_ms(ms))
             .ok();
+    }
+
+    pub(crate) fn set_queue_periods_async(self: &Arc<Self>, periods: u32) {
+        let ctl = Arc::clone(self);
+        std::thread::Builder::new()
+            .name("deviceout-queue".into())
+            .spawn(move || ctl.set_queue_periods(periods))
+            .ok();
+    }
+
+    fn set_queue_periods(&self, periods: u32) {
+        let periods = clamp_queue_periods(periods);
+        self.queue_periods.store(periods, Ordering::Relaxed);
+        let mut producer = self.producer.lock();
+        let mut slot = self.slot.lock();
+        let Some(config) = slot.config.as_mut() else {
+            return;
+        };
+        config.device_queue_periods = periods;
+        self.restart(&mut producer, &mut slot);
     }
 
     fn set_device(&self, device_id: String) {
@@ -178,6 +207,13 @@ impl EngineController {
     }
 }
 
+pub(crate) fn clamp_queue_periods(periods: u32) -> u32 {
+    periods.clamp(
+        QUEUE_PERIOD_STEPS[0],
+        QUEUE_PERIOD_STEPS[QUEUE_PERIOD_STEPS.len() - 1],
+    )
+}
+
 fn capacity_for(config: &EngineConfig) -> usize {
     let target = frames_for_ms(config.target_ms, config.source_rate_hz);
     ring_capacity_for_target(target.max(config.max_block_frames))
@@ -203,6 +239,14 @@ mod tests {
         assert_eq!(clamp_target_ms(0, 13), 20);
         assert_eq!(clamp_target_ms(u32::MAX, 13), 120);
         assert_eq!(clamp_target_ms(10, 1_376), 120);
+    }
+
+    #[test]
+    fn the_device_queue_stays_within_the_offered_steps() {
+        assert_eq!(clamp_queue_periods(0), 2);
+        assert_eq!(clamp_queue_periods(3), 3);
+        assert_eq!(clamp_queue_periods(99), 4);
+        assert_eq!(clamp_queue_periods(DEFAULT_QUEUE_PERIODS), 2);
     }
 
     #[test]

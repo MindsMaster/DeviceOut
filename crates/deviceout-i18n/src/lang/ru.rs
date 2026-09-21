@@ -16,6 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "Дрейф",
     heading_format: "Формат",
     heading_target_latency: "Целевая задержка",
+    heading_device_queue: "Очередь устройства",
     mix_format: "{rate} Hz / {channels} кан. / {sample}",
     sample_f32: "32-бит с плавающей точкой",
     sample_i16: "16-бит целое",

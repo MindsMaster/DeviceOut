@@ -15,7 +15,8 @@ mod engine_ctl;
 mod heartbeat;
 
 pub(crate) use engine_ctl::{
-    min_target_ms, EngineController, DEFAULT_TARGET_MS, TARGET_MS_STEPS,
+    min_target_ms, EngineController, DEFAULT_QUEUE_PERIODS, DEFAULT_TARGET_MS, QUEUE_PERIOD_STEPS,
+    TARGET_MS_STEPS,
 };
 pub(crate) use heartbeat::Heartbeat;
 
@@ -49,6 +50,9 @@ struct DeviceOutParams {
 
     #[persist = "target-ms"]
     target_ms: Arc<RwLock<u32>>,
+
+    #[persist = "queue-periods"]
+    queue_periods: Arc<RwLock<u32>>,
 }
 
 impl Default for DeviceOutParams {
@@ -57,6 +61,7 @@ impl Default for DeviceOutParams {
             editor_state: EguiState::from_size(EDITOR_WIDTH, EDITOR_HEIGHT),
             device_id: Arc::new(RwLock::new(String::new())),
             target_ms: Arc::new(RwLock::new(DEFAULT_TARGET_MS)),
+            queue_periods: Arc::new(RwLock::new(DEFAULT_QUEUE_PERIODS)),
         }
     }
 }
@@ -152,12 +157,14 @@ impl Plugin for DeviceOut {
                 source_rate_hz: source_rate,
                 channels,
                 max_block_frames: buffer_config.max_buffer_size as usize,
+                device_queue_periods: *self.params.queue_periods.read(),
                 ..Default::default()
             },
             requested,
             floor,
         );
         *self.params.target_ms.write() = target_ms;
+        *self.params.queue_periods.write() = self.engine.queue_periods();
 
         true
     }

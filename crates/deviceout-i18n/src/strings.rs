@@ -15,6 +15,7 @@ pub struct Strings {
     pub heading_drift: &'static str,
     pub heading_format: &'static str,
     pub heading_target_latency: &'static str,
+    pub heading_device_queue: &'static str,
     pub mix_format: &'static str,
     pub sample_f32: &'static str,
     pub sample_i16: &'static str,

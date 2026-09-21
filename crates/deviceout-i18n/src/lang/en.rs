@@ -16,6 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "Drift",
     heading_format: "Format",
     heading_target_latency: "Target latency",
+    heading_device_queue: "Device queue",
     mix_format: "{rate} Hz / {channels} ch / {sample}",
     sample_f32: "32-bit float",
     sample_i16: "16-bit int",

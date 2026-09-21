@@ -16,6 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "ดริฟต์",
     heading_format: "รูปแบบ",
     heading_target_latency: "เวลาหน่วงเป้าหมาย",
+    heading_device_queue: "คิวอุปกรณ์",
     mix_format: "{rate} Hz / {channels} แชนเนล / {sample}",
     sample_f32: "ทศนิยมลอยตัว 32 บิต",
     sample_i16: "จำนวนเต็ม 16 บิต",

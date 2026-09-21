@@ -12,7 +12,10 @@ use deviceout_i18n::{fill, t, Strings};
 use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
-use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, TARGET_MS_STEPS};
+use crate::{
+    enumerate_devices, DeviceOutParams, EngineController, UiState, QUEUE_PERIOD_STEPS,
+    TARGET_MS_STEPS,
+};
 
 mod fonts;
 #[cfg(test)]
@@ -68,6 +71,7 @@ struct EditorUi {
     prompt_wait: Option<PromptWait>,
     telemetry_opt_in: bool,
     target_drag: Option<u32>,
+    queue_drag: Option<u32>,
     send_watch: Option<(String, Instant)>,
     send_note: Option<(Instant, String, egui::Color32)>,
 }
@@ -82,6 +86,7 @@ impl Default for EditorUi {
             prompt_wait: None,
             telemetry_opt_in: deviceout_update::telemetry::is_enabled(),
             target_drag: None,
+            queue_drag: None,
             send_watch: None,
             send_note: None,
         }
@@ -458,7 +463,39 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
                 w.engine.set_target_ms_async(next);
             }
         }
+
+        ui.add_space(14.0);
+        queue_row(ui, state, w);
     });
+}
+
+fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
+    let committed = w.engine.queue_periods();
+    let shown = state.queue_drag.unwrap_or(committed);
+    widgets::section_heading(
+        ui,
+        t().heading_device_queue,
+        Some(
+            egui::RichText::new(format!("{shown}×"))
+                .font(egui::FontId::monospace(12.0))
+                .color(theme::TEXT),
+        ),
+    );
+    ui.add_space(8.0);
+
+    let mut idx = target_step_index(QUEUE_PERIOD_STEPS, shown);
+    let slider = widgets::stepped_slider(ui, &mut idx, QUEUE_PERIOD_STEPS.len());
+    let next = QUEUE_PERIOD_STEPS[idx.min(QUEUE_PERIOD_STEPS.len() - 1)];
+    if slider.dragged() {
+        state.queue_drag = Some(next);
+    }
+    if slider.drag_stopped() || (slider.clicked() && !slider.dragged()) {
+        state.queue_drag = None;
+        if next != committed {
+            *w.params.queue_periods.write() = next;
+            w.engine.set_queue_periods_async(next);
+        }
+    }
 }
 
 fn mix_format_text(fmt: &StreamFormat) -> String {

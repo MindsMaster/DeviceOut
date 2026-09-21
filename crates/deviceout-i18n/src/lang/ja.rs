@@ -16,6 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "ドリフト",
     heading_format: "フォーマット",
     heading_target_latency: "目標レイテンシー",
+    heading_device_queue: "デバイスキュー",
     mix_format: "{rate} Hz / {channels} ch / {sample}",
     sample_f32: "32ビット浮動小数点",
     sample_i16: "16ビット整数",

@@ -14,11 +14,14 @@ use crate::wasapi::{find_device_by_id, parse_format, ComGuard};
 use crate::{AudioSink, WriteReport};
 
 const WAIT_TIMEOUT_MS: u32 = 2000;
-const QUEUE_PERIODS: usize = 2;
 
-pub fn device_queue_limit(period_frames: usize, buffer_frames: usize) -> usize {
+pub const MIN_QUEUE_PERIODS: u32 = 2;
+pub const MAX_QUEUE_PERIODS: u32 = 4;
+
+pub fn device_queue_limit(period_frames: usize, buffer_frames: usize, periods: u32) -> usize {
+    let periods = periods.clamp(MIN_QUEUE_PERIODS, MAX_QUEUE_PERIODS) as usize;
     period_frames
-        .saturating_mul(QUEUE_PERIODS)
+        .saturating_mul(periods)
         .clamp(1, buffer_frames.max(1))
 }
 
@@ -57,7 +60,7 @@ pub struct WasapiSink {
 unsafe impl Send for WasapiSink {}
 
 impl WasapiSink {
-    pub fn open(device_id: &str, buffer_ms: u32) -> Result<Self, SinkError> {
+    pub fn open(device_id: &str, buffer_ms: u32, queue_periods: u32) -> Result<Self, SinkError> {
         let com = ComGuard::new()?;
         let device = find_device_by_id(device_id)?;
 
@@ -113,7 +116,11 @@ impl WasapiSink {
                 format,
                 buffer_frames,
                 period_frames,
-                queue_limit: device_queue_limit(period_frames, buffer_frames as usize),
+                queue_limit: device_queue_limit(
+                    period_frames,
+                    buffer_frames as usize,
+                    queue_periods,
+                ),
                 running: false,
                 _com: com,
             })
@@ -269,17 +276,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_device_queue_holds_a_couple_of_periods_not_the_whole_buffer() {
-        assert_eq!(device_queue_limit(480, 1_920), 960);
-        assert_eq!(device_queue_limit(480, 4_800), 960);
-        assert_eq!(device_queue_limit(128, 1_920), 256);
+    fn the_device_queue_holds_the_requested_periods_not_the_whole_buffer() {
+        assert_eq!(device_queue_limit(480, 4_800, 2), 960);
+        assert_eq!(device_queue_limit(480, 4_800, 3), 1_440);
+        assert_eq!(device_queue_limit(480, 4_800, 4), 1_920);
+        assert_eq!(device_queue_limit(128, 4_800, 2), 256);
+    }
+
+    #[test]
+    fn a_silly_period_count_is_pulled_back_into_range() {
+        assert_eq!(device_queue_limit(480, 4_800, 0), 960);
+        assert_eq!(device_queue_limit(480, 4_800, 1), 960);
+        assert_eq!(device_queue_limit(480, 4_800, u32::MAX), 1_920);
     }
 
     #[test]
     fn the_device_queue_never_exceeds_the_allocated_buffer() {
-        assert_eq!(device_queue_limit(480, 480), 480);
-        assert_eq!(device_queue_limit(480, 0), 1);
-        assert_eq!(device_queue_limit(usize::MAX, 1_920), 1_920);
+        assert_eq!(device_queue_limit(480, 480, 2), 480);
+        assert_eq!(device_queue_limit(480, 0, 2), 1);
+        assert_eq!(device_queue_limit(usize::MAX, 1_920, 2), 1_920);
     }
 
     fn rendered(fmt: SampleFormat, src: &[f32]) -> Vec<u8> {

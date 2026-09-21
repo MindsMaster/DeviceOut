@@ -16,6 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "Dérive",
     heading_format: "Format",
     heading_target_latency: "Latence cible",
+    heading_device_queue: "File du périphérique",
     mix_format: "{rate} Hz / {channels} can. / {sample}",
     sample_f32: "flottant 32 bits",
     sample_i16: "entier 16 bits",
