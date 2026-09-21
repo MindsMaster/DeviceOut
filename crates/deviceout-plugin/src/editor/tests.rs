@@ -118,6 +118,7 @@ fn failed_snapshot() -> UiState {
         capacity_frames: 0,
         target_frames: 0.0,
         min_target_frames: 0,
+        exclusive: false,
         drift_ppm: None,
         raw_drift_ppm: 0.0,
         underruns: 0,

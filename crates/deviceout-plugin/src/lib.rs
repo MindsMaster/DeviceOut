@@ -53,6 +53,9 @@ struct DeviceOutParams {
 
     #[persist = "queue-periods"]
     queue_periods: Arc<RwLock<u32>>,
+
+    #[persist = "exclusive"]
+    exclusive: Arc<RwLock<bool>>,
 }
 
 impl Default for DeviceOutParams {
@@ -62,6 +65,7 @@ impl Default for DeviceOutParams {
             device_id: Arc::new(RwLock::new(String::new())),
             target_ms: Arc::new(RwLock::new(DEFAULT_TARGET_MS)),
             queue_periods: Arc::new(RwLock::new(DEFAULT_QUEUE_PERIODS)),
+            exclusive: Arc::new(RwLock::new(false)),
         }
     }
 }
@@ -158,6 +162,7 @@ impl Plugin for DeviceOut {
                 channels,
                 max_block_frames: buffer_config.max_buffer_size as usize,
                 device_queue_periods: *self.params.queue_periods.read(),
+                exclusive: *self.params.exclusive.read(),
                 ..Default::default()
             },
             requested,
@@ -238,6 +243,7 @@ pub(crate) struct UiState {
     pub capacity_frames: u64,
     pub target_frames: f64,
     pub min_target_frames: u64,
+    pub exclusive: bool,
     pub drift_ppm: Option<f64>,
     pub raw_drift_ppm: f64,
     pub underruns: u64,

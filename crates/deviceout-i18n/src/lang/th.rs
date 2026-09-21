@@ -17,6 +17,8 @@ pub static STRINGS: Strings = Strings {
     heading_format: "รูปแบบ",
     heading_target_latency: "เวลาหน่วงเป้าหมาย",
     heading_device_queue: "คิวอุปกรณ์",
+    heading_exclusive: "โหมดเอกสิทธิ์",
+    exclusive_fell_back: "ใช้โหมดเอกสิทธิ์ไม่ได้ กำลังใช้โหมดแบ่งใช้",
     mix_format: "{rate} Hz / {channels} แชนเนล / {sample}",
     sample_f32: "ทศนิยมลอยตัว 32 บิต",
     sample_i16: "จำนวนเต็ม 16 บิต",

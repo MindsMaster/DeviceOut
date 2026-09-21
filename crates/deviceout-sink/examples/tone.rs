@@ -24,7 +24,7 @@ fn main() {
     };
     println!("目标设备: {info}");
 
-    let mut sink = WasapiSink::open(&info.id, 40, deviceout_sink::MIN_QUEUE_PERIODS).expect("打开输出流失败");
+    let mut sink = WasapiSink::open(&info.id, deviceout_sink::SinkOptions::default()).expect("打开输出流失败");
     let fmt = sink.format();
     let channels = fmt.channels as usize;
     println!(

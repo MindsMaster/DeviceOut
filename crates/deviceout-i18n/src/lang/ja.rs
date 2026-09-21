@@ -17,6 +17,8 @@ pub static STRINGS: Strings = Strings {
     heading_format: "フォーマット",
     heading_target_latency: "目標レイテンシー",
     heading_device_queue: "デバイスキュー",
+    heading_exclusive: "排他モード",
+    exclusive_fell_back: "排他モードを利用できないため共有モードで動作中",
     mix_format: "{rate} Hz / {channels} ch / {sample}",
     sample_f32: "32ビット浮動小数点",
     sample_i16: "16ビット整数",

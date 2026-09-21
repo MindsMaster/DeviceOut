@@ -17,6 +17,8 @@ pub static STRINGS: Strings = Strings {
     heading_format: "포맷",
     heading_target_latency: "목표 지연 시간",
     heading_device_queue: "장치 큐",
+    heading_exclusive: "독점 모드",
+    exclusive_fell_back: "독점 모드를 사용할 수 없어 공유 모드로 동작 중",
     mix_format: "{rate} Hz / {channels}채널 / {sample}",
     sample_f32: "32비트 부동 소수점",
     sample_i16: "16비트 정수",

@@ -19,6 +19,7 @@ pub struct EngineConfig {
     pub target_ms: f64,
     pub device_buffer_ms: u32,
     pub device_queue_periods: u32,
+    pub exclusive: bool,
     pub prime_timeout_s: f64,
     pub tuning: DriftTuning,
 }
@@ -33,6 +34,7 @@ impl Default for EngineConfig {
             target_ms: DEFAULT_TARGET_MS,
             device_buffer_ms: 40,
             device_queue_periods: deviceout_sink::MIN_QUEUE_PERIODS,
+            exclusive: false,
             prime_timeout_s: 5.0,
             tuning: DriftTuning::default(),
         }
@@ -120,8 +122,11 @@ pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
     start_with(consumer, config, |cfg: &EngineConfig| {
         deviceout_sink::WasapiSink::open(
             &cfg.device_id,
-            cfg.device_buffer_ms,
-            cfg.device_queue_periods,
+            deviceout_sink::SinkOptions {
+                buffer_ms: cfg.device_buffer_ms,
+                queue_periods: cfg.device_queue_periods,
+                exclusive: cfg.exclusive,
+            },
         )
     })
 }
@@ -336,6 +341,7 @@ impl<S: AudioSink> Worker<S> {
             channels,
             rx.capacity_frames(),
             resampler.output_delay(),
+            sink.exclusive(),
         );
         metrics.set_target(target_frames, min_target, config.tuning.settle_time_s * 3.0);
 

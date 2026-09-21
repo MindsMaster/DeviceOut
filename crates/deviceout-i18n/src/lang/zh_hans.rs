@@ -17,6 +17,8 @@ pub static STRINGS: Strings = Strings {
     heading_format: "格式",
     heading_target_latency: "目标延迟",
     heading_device_queue: "设备队列",
+    heading_exclusive: "独占模式",
+    exclusive_fell_back: "独占模式不可用，已回落共享模式",
     mix_format: "{rate} Hz / {channels} 声道 / {sample}",
     sample_f32: "32 位浮点",
     sample_i16: "16 位整型",

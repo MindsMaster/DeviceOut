@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
@@ -61,6 +61,7 @@ pub(crate) struct EngineController {
     target_ms: AtomicU32,
     target_floor_ms: AtomicU32,
     queue_periods: AtomicU32,
+    exclusive: AtomicBool,
 }
 
 impl EngineController {
@@ -84,12 +85,17 @@ impl EngineController {
         self.queue_periods.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn exclusive(&self) -> bool {
+        self.exclusive.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn initialize(&self, config: EngineConfig, target_ms: u32, floor_ms: u32) -> u32 {
         let ms = clamp_target_ms(target_ms, floor_ms);
         self.target_floor_ms.store(floor_ms, Ordering::Relaxed);
         self.target_ms.store(ms, Ordering::Relaxed);
         self.queue_periods
             .store(clamp_queue_periods(config.device_queue_periods), Ordering::Relaxed);
+        self.exclusive.store(config.exclusive, Ordering::Relaxed);
 
         let mut producer = self.producer.lock();
         let mut slot = self.slot.lock();
@@ -141,6 +147,25 @@ impl EngineController {
             .name("deviceout-queue".into())
             .spawn(move || ctl.set_queue_periods(periods))
             .ok();
+    }
+
+    pub(crate) fn set_exclusive_async(self: &Arc<Self>, exclusive: bool) {
+        let ctl = Arc::clone(self);
+        std::thread::Builder::new()
+            .name("deviceout-mode".into())
+            .spawn(move || ctl.set_exclusive(exclusive))
+            .ok();
+    }
+
+    fn set_exclusive(&self, exclusive: bool) {
+        self.exclusive.store(exclusive, Ordering::Relaxed);
+        let mut producer = self.producer.lock();
+        let mut slot = self.slot.lock();
+        let Some(config) = slot.config.as_mut() else {
+            return;
+        };
+        config.exclusive = exclusive;
+        self.restart(&mut producer, &mut slot);
     }
 
     fn set_queue_periods(&self, periods: u32) {

@@ -136,12 +136,12 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
                                             ui.add_space(12.0);
                                             stats_card(ui, Some(s));
                                             ui.add_space(12.0);
-                                            size_card(ui, state, &w);
+                                            tuning_card(ui, state, &w, snap.as_ref());
                                         }
                                         None => {
                                             stats_card(ui, None);
                                             ui.add_space(12.0);
-                                            size_card(ui, state, &w);
+                                            tuning_card(ui, state, &w, snap.as_ref());
                                             ui.add_space(12.0);
                                             idle_card(ui);
                                         }
@@ -196,6 +196,7 @@ fn snapshot(engine: &EngineController) -> Option<UiState> {
         capacity_frames: m.capacity_frames(),
         target_frames: m.target_frames(),
         min_target_frames: m.min_target_frames(),
+        exclusive: m.exclusive(),
         drift_ppm: m.drift_ppm_settled(),
         raw_drift_ppm: m.drift_ppm(),
         underruns: stats.underrun_events(),
@@ -431,7 +432,7 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
     });
 }
 
-fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
+fn tuning_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&UiState>) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
 
@@ -466,7 +467,23 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
 
         ui.add_space(14.0);
         queue_row(ui, state, w);
+        ui.add_space(14.0);
+        exclusive_row(ui, w, snap);
     });
+}
+
+fn exclusive_row(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
+    let mut wanted = w.engine.exclusive();
+    widgets::section_heading(ui, t().heading_exclusive, None);
+    ui.add_space(6.0);
+    if widgets::switch(ui, &mut wanted).changed() {
+        *w.params.exclusive.write() = wanted;
+        w.engine.set_exclusive_async(wanted);
+    }
+    if wanted && snap.is_some_and(|s| !s.exclusive) {
+        ui.add_space(6.0);
+        widgets::alert_line(ui, theme::AMBER, t().exclusive_fell_back);
+    }
 }
 
 fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
@@ -892,7 +909,7 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         .map(|v| format!("{v:.1}"))
         .unwrap_or_else(|| format!("raw {:.1}", s.raw_drift_ppm));
     format!(
-        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\ntarget_frames={:.0}\nmin_target_frames={}\nperiod_frames={}\nsink_hz={:.0}\nengine_error={}",
+        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\ntarget_frames={:.0}\nmin_target_frames={}\nexclusive={}\nperiod_frames={}\nsink_hz={:.0}\nengine_error={}",
         s.state,
         s.fill_fraction * 100.0,
         s.underruns,
@@ -907,6 +924,7 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         s.capacity_frames,
         s.target_frames,
         s.min_target_frames,
+        s.exclusive,
         s.period_frames,
         s.sink_rate_hz,
         deviceout_update::sanitize_user_paths(

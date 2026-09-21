@@ -17,6 +17,8 @@ pub static STRINGS: Strings = Strings {
     heading_format: "Format",
     heading_target_latency: "Latence cible",
     heading_device_queue: "File du périphérique",
+    heading_exclusive: "Mode exclusif",
+    exclusive_fell_back: "Mode exclusif indisponible, mode partagé utilisé",
     mix_format: "{rate} Hz / {channels} can. / {sample}",
     sample_f32: "flottant 32 bits",
     sample_i16: "entier 16 bits",

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use deviceout_core::BridgeStats;
@@ -53,6 +53,7 @@ pub struct EngineMetrics {
     capacity_frames: AtomicU64,
     target_frames: AtomicU64,
     min_target_frames: AtomicU64,
+    exclusive: AtomicBool,
     smoothed_fill: AtomicU64,
     drift_ppm: AtomicU64,
     ratio: AtomicU64,
@@ -101,6 +102,7 @@ impl EngineMetrics {
             capacity_frames: AtomicU64::new(0),
             target_frames: AtomicU64::new(0),
             min_target_frames: AtomicU64::new(0),
+            exclusive: AtomicBool::new(false),
             smoothed_fill: AtomicU64::new(0),
             drift_ppm: AtomicU64::new(0),
             ratio: AtomicU64::new(1.0f64.to_bits()),
@@ -162,6 +164,7 @@ impl EngineMetrics {
         channels: usize,
         capacity: usize,
         resampler_delay_frames: usize,
+        exclusive: bool,
     ) {
         store_f64(&self.source_rate_hz, source_rate_hz);
         store_f64(&self.sink_rate_hz, sink_rate_hz);
@@ -172,6 +175,7 @@ impl EngineMetrics {
             .store(capacity as u64, Ordering::Relaxed);
         self.resampler_delay_frames
             .store(resampler_delay_frames as u64, Ordering::Relaxed);
+        self.exclusive.store(exclusive, Ordering::Relaxed);
     }
 
     pub(crate) fn set_target(
@@ -234,6 +238,10 @@ impl EngineMetrics {
 
     pub fn target_frames(&self) -> f64 {
         load_f64(&self.target_frames)
+    }
+
+    pub fn exclusive(&self) -> bool {
+        self.exclusive.load(Ordering::Relaxed)
     }
 
     pub fn min_target_frames(&self) -> u64 {
