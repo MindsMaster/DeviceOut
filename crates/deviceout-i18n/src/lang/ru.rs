@@ -16,7 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "Дрейф",
     heading_format: "Формат",
     heading_target_latency: "Целевая задержка",
-    heading_device_queue: "Очередь устройства",
+    heading_device_buffer: "Буфер устройства",
     heading_exclusive: "Монопольный режим",
     exclusive_fell_back: "Монопольный режим недоступен, используется общий",
     step_unavailable: "ниже предела системы",

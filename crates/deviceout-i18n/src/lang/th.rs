@@ -16,7 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "ดริฟต์",
     heading_format: "รูปแบบ",
     heading_target_latency: "เวลาหน่วงเป้าหมาย",
-    heading_device_queue: "คิวอุปกรณ์",
+    heading_device_buffer: "บัฟเฟอร์อุปกรณ์",
     heading_exclusive: "โหมดเอกสิทธิ์",
     exclusive_fell_back: "ใช้โหมดเอกสิทธิ์ไม่ได้ กำลังใช้โหมดแบ่งใช้",
     step_unavailable: "ต่ำกว่าขีดจำกัดของระบบ",

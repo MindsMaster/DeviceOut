@@ -16,7 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "漂移",
     heading_format: "格式",
     heading_target_latency: "目標延遲",
-    heading_device_queue: "裝置佇列",
+    heading_device_buffer: "裝置緩衝",
     heading_exclusive: "獨佔模式",
     exclusive_fell_back: "獨佔模式不可用，已回落共用模式",
     step_unavailable: "低於系統下限",

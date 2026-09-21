@@ -16,7 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "드리프트",
     heading_format: "포맷",
     heading_target_latency: "목표 지연 시간",
-    heading_device_queue: "장치 큐",
+    heading_device_buffer: "장치 버퍼",
     heading_exclusive: "독점 모드",
     exclusive_fell_back: "독점 모드를 사용할 수 없어 공유 모드로 동작 중",
     step_unavailable: "시스템 하한보다 낮음",

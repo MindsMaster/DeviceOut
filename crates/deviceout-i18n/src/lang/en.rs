@@ -16,7 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "Drift",
     heading_format: "Format",
     heading_target_latency: "Target latency",
-    heading_device_queue: "Device queue",
+    heading_device_buffer: "Device buffer",
     heading_exclusive: "Exclusive mode",
     exclusive_fell_back: "Exclusive mode unavailable, using shared mode",
     step_unavailable: "below this system's floor",

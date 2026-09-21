@@ -16,7 +16,7 @@ pub static STRINGS: Strings = Strings {
     heading_drift: "Drift",
     heading_format: "Format",
     heading_target_latency: "Ziellatenz",
-    heading_device_queue: "Gerätepuffer",
+    heading_device_buffer: "Gerätepuffer",
     heading_exclusive: "Exklusivmodus",
     exclusive_fell_back: "Exklusivmodus nicht verfügbar, gemeinsamer Modus wird verwendet",
     step_unavailable: "unter der Systemgrenze",

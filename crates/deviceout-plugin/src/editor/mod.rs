@@ -499,7 +499,7 @@ fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&
         .map(|&n| queue_ms(n, period_ms))
         .collect();
 
-    widgets::section_heading(ui, t().heading_device_queue, None);
+    widgets::section_heading(ui, t().heading_device_buffer, None);
     ui.add_space(8.0);
     let picked = widgets::number_combo(
         ui,

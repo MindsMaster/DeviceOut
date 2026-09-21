@@ -15,7 +15,7 @@ pub struct Strings {
     pub heading_drift: &'static str,
     pub heading_format: &'static str,
     pub heading_target_latency: &'static str,
-    pub heading_device_queue: &'static str,
+    pub heading_device_buffer: &'static str,
     pub heading_exclusive: &'static str,
     pub exclusive_fell_back: &'static str,
     pub step_unavailable: &'static str,
