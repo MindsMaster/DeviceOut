@@ -3,7 +3,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use deviceout_core::ring;
-use deviceout_engine::{start_with, EngineConfig, EngineHandle, EngineState, FaultKind};
+use deviceout_engine::{
+    min_target_frames, start_with, EngineConfig, EngineHandle, EngineState, FaultKind,
+    DEFAULT_BLOCK_FRAMES,
+};
 use deviceout_sink::{AudioSink, SampleFormat, SinkError, StreamFormat, WriteReport};
 
 const RATE: u32 = 48_000;
@@ -128,7 +131,9 @@ fn a_full_ring_is_trimmed_to_target_before_streaming() {
     assert!(wait_for(&handle, Duration::from_secs(2), |h| {
         h.metrics().state() == EngineState::Running
     }));
-    assert_eq!(handle.metrics().frames_discarded(), (CAPACITY / 2) as u64);
+    let target = handle.metrics().target_frames() as u64;
+    assert_eq!(target, min_target_frames(DEFAULT_BLOCK_FRAMES, PERIOD) as u64);
+    assert_eq!(handle.metrics().frames_discarded(), CAPACITY as u64 - target);
     assert_eq!(handle.metrics().reconnects(), 0);
     assert!(handle.stop().is_some());
 }

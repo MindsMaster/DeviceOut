@@ -6,4 +6,7 @@ pub use error::{EngineError, Fault, FaultKind};
 pub use metrics::{latency_ms, EngineMetrics, EngineState};
 #[cfg(windows)]
 pub use worker::start;
-pub use worker::{ring_capacity_frames, start_with, EngineConfig, EngineHandle, OpenSink};
+pub use worker::{
+    frames_for_ms, min_target_frames, ring_capacity_for_target, ring_capacity_frames, start_with,
+    EngineConfig, EngineHandle, OpenSink, DEFAULT_BLOCK_FRAMES, DEFAULT_TARGET_MS,
+};

@@ -17,6 +17,12 @@ impl Default for DriftTuning {
     }
 }
 
+const LOWPASS_BANDWIDTH_RATIO: f64 = 5.0;
+
+fn max_lowpass_tau_s(wn: f64) -> f64 {
+    1.0 / (LOWPASS_BANDWIDTH_RATIO * wn)
+}
+
 #[derive(Debug)]
 pub struct DriftController {
     target_frames: f64,
@@ -47,19 +53,11 @@ impl DriftController {
         let g = sink_rate_hz / target_frames;
         let wn = 4.0 / (tuning.damping * tuning.settle_time_s);
 
-        debug_assert!(
-            1.0 / tuning.lowpass_tau_s >= 5.0 * wn,
-            "低通截止 {:.3} rad/s 相对控制带宽 {:.3} rad/s 太低 \
-             请增大 settle_time_s 或减小 lowpass_tau_s",
-            1.0 / tuning.lowpass_tau_s,
-            wn
-        );
-
         Self {
             target_frames,
             ki: wn * wn / g,
             kp: 2.0 * tuning.damping * wn / g,
-            lowpass_tau_s: tuning.lowpass_tau_s,
+            lowpass_tau_s: max_lowpass_tau_s(wn).min(tuning.lowpass_tau_s),
             max_correction: tuning.max_correction,
             nominal_ratio,
             filtered_fill: target_frames,
@@ -118,6 +116,11 @@ impl DriftController {
         self.target_frames
     }
 
+    #[inline]
+    pub fn lowpass_tau_s(&self) -> f64 {
+        self.lowpass_tau_s
+    }
+
     pub fn reset(&mut self) {
         self.filtered_fill = self.target_frames;
         self.integral = 0.0;
@@ -146,20 +149,24 @@ mod tests {
     }
 
     fn simulate(ppm: f64, secs: f64, controlled: bool) -> SimResult {
+        simulate_at(TARGET, CAPACITY, ppm, secs, controlled)
+    }
+
+    fn simulate_at(target: f64, capacity: f64, ppm: f64, secs: f64, controlled: bool) -> SimResult {
         let source_rate = SINK_RATE * (1.0 + ppm * 1.0e-6);
         let dt = BLOCK / SINK_RATE;
-        let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, DriftTuning::default());
+        let mut ctrl = DriftController::new(target, SINK_RATE, 1.0, DriftTuning::default());
 
-        let mut fill = TARGET;
+        let mut fill = target;
         let (mut underruns, mut overruns) = (0u32, 0u32);
         let (mut max_fill, mut min_fill) = (fill, fill);
         let warmup = (2.0 / dt) as usize;
 
         for step in 0..(secs / dt) as usize {
             fill += source_rate * dt;
-            if fill > CAPACITY {
+            if fill > capacity {
                 overruns += 1;
-                fill = CAPACITY;
+                fill = capacity;
             }
 
             let ratio = if controlled { ctrl.ratio() } else { 1.0 };
@@ -252,6 +259,53 @@ mod tests {
             "临界阻尼下出现了明显过冲: {r:?}"
         );
         assert!(r.max_fill < TARGET * 1.15, "水位向上偏离过多: {r:?}");
+    }
+
+    #[test]
+    fn the_lowpass_can_never_outrun_the_control_bandwidth() {
+        let slack = DriftTuning {
+            lowpass_tau_s: 30.0,
+            ..DriftTuning::default()
+        };
+        let ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, slack);
+        assert!(ctrl.lowpass_tau_s() <= 3.0 + 1e-12, "{}", ctrl.lowpass_tau_s());
+
+        let tight = DriftTuning {
+            lowpass_tau_s: 0.2,
+            ..DriftTuning::default()
+        };
+        let ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, tight);
+        assert_eq!(ctrl.lowpass_tau_s(), 0.2);
+    }
+
+    #[test]
+    fn a_thirty_millisecond_target_still_holds() {
+        const SMALL: f64 = 1_440.0;
+        const ROOM: f64 = 8_192.0;
+
+        for ppm in [-1_000.0, -152.0, 0.0, 152.0, 1_000.0] {
+            let r = simulate_at(SMALL, ROOM, ppm, 900.0, true);
+            assert_eq!(r.underruns, 0, "{ppm} ppm 下欠载: {r:?}");
+            assert_eq!(r.overruns, 0, "{ppm} ppm 下溢出: {r:?}");
+            assert!(
+                (r.final_fill - SMALL).abs() / SMALL < 0.02,
+                "{ppm} ppm 未收敛: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_settling_excursion_does_not_grow_as_the_target_shrinks() {
+        let wide = simulate_at(TARGET, CAPACITY, 152.0, 900.0, true);
+        let tight = simulate_at(1_440.0, 8_192.0, 152.0, 900.0, true);
+
+        let wide_swing = (wide.max_fill - TARGET).max(TARGET - wide.min_fill);
+        let tight_swing = (tight.max_fill - 1_440.0).max(1_440.0 - tight.min_fill);
+        assert!(
+            tight_swing < wide_swing * 1.5,
+            "小水位的偏移被放大了: {wide_swing:.0} -> {tight_swing:.0}"
+        );
+        assert!(tight_swing < 200.0, "偏移超出预期: {tight_swing:.0}");
     }
 
     #[test]

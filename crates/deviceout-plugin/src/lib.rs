@@ -151,6 +151,7 @@ impl Plugin for DeviceOut {
                 device_id,
                 source_rate_hz: source_rate,
                 channels,
+                max_block_frames: buffer_config.max_buffer_size as usize,
                 ..Default::default()
             },
             requested,

@@ -15,6 +15,8 @@ pub struct EngineConfig {
     pub device_id: String,
     pub source_rate_hz: f64,
     pub channels: usize,
+    pub max_block_frames: usize,
+    pub target_ms: f64,
     pub device_buffer_ms: u32,
     pub prime_timeout_s: f64,
     pub tuning: DriftTuning,
@@ -26,6 +28,8 @@ impl Default for EngineConfig {
             device_id: String::new(),
             source_rate_hz: 48_000.0,
             channels: 2,
+            max_block_frames: DEFAULT_BLOCK_FRAMES,
+            target_ms: DEFAULT_TARGET_MS,
             device_buffer_ms: 40,
             prime_timeout_s: 5.0,
             tuning: DriftTuning::default(),
@@ -33,8 +37,39 @@ impl Default for EngineConfig {
     }
 }
 
+pub const DEFAULT_TARGET_MS: f64 = 30.0;
+pub const DEFAULT_BLOCK_FRAMES: usize = 512;
+
+const CAPACITY_FACTOR: usize = 4;
+const MIN_CAPACITY_FRAMES: usize = 2_048;
+const PERIOD_MARGIN: usize = 2;
+
 pub fn ring_capacity_frames(source_rate_hz: f64, ring_ms: f64) -> usize {
     ((source_rate_hz * ring_ms * 1.0e-3).round() as usize).max(2)
+}
+
+pub fn frames_for_ms(ms: f64, rate_hz: f64) -> usize {
+    if !ms.is_finite() || ms <= 0.0 || !rate_hz.is_finite() || rate_hz <= 0.0 {
+        return 1;
+    }
+    ((ms * rate_hz * 1.0e-3).round() as usize).max(1)
+}
+
+pub fn min_target_frames(max_block_frames: usize, period_frames: usize) -> usize {
+    (max_block_frames + PERIOD_MARGIN * period_frames).max(1)
+}
+
+pub fn ring_capacity_for_target(target_frames: usize) -> usize {
+    target_frames
+        .saturating_mul(CAPACITY_FACTOR)
+        .max(MIN_CAPACITY_FRAMES)
+        .next_power_of_two()
+}
+
+fn target_level(config: &EngineConfig, period_frames: usize, capacity_frames: usize) -> f64 {
+    let ceiling = (capacity_frames / 2).max(1);
+    let floor = min_target_frames(config.max_block_frames, period_frames).min(ceiling);
+    frames_for_ms(config.target_ms, config.source_rate_hz).clamp(floor, ceiling) as f64
 }
 
 pub trait OpenSink: Send + 'static {
@@ -140,6 +175,9 @@ fn validate(consumer: &RingConsumer, config: &EngineConfig) -> Result<(), Engine
     }
     if !config.source_rate_hz.is_finite() || config.source_rate_hz <= 0.0 {
         return Err(EngineError::Config("DAW 侧采样率必须是有限正数".into()));
+    }
+    if !config.target_ms.is_finite() || config.target_ms <= 0.0 {
+        return Err(EngineError::Config("目标延迟必须是有限正数".into()));
     }
     Ok(())
 }
@@ -272,8 +310,9 @@ impl<S: AudioSink> Worker<S> {
 
         let sink_rate = f64::from(format.sample_rate);
         let period_frames = sink.period_frames();
-        let target_frames = (rx.capacity_frames() / 2) as f64;
         let nominal_ratio = sink_rate / config.source_rate_hz;
+        let period_source_frames = ((period_frames as f64 / nominal_ratio).ceil() as usize).max(1);
+        let target_frames = target_level(config, period_source_frames, rx.capacity_frames());
 
         let ctrl = DriftController::new(target_frames, sink_rate, nominal_ratio, config.tuning);
         let resampler =
@@ -413,6 +452,55 @@ impl<S: AudioSink> std::fmt::Debug for Worker<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cfg(target_ms: f64, max_block_frames: usize) -> EngineConfig {
+        EngineConfig {
+            source_rate_hz: 48_000.0,
+            max_block_frames,
+            target_ms,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_target_follows_the_requested_milliseconds() {
+        assert_eq!(target_level(&cfg(30.0, 128), 480, 16_384), 1_440.0);
+        assert_eq!(target_level(&cfg(50.0, 128), 480, 16_384), 2_400.0);
+        assert_eq!(target_level(&cfg(120.0, 128), 480, 32_768), 5_760.0);
+    }
+
+    #[test]
+    fn the_target_never_dips_below_one_block_plus_two_periods() {
+        assert_eq!(min_target_frames(512, 480), 1_472);
+        assert_eq!(target_level(&cfg(30.0, 512), 480, 16_384), 1_472.0);
+        assert_eq!(target_level(&cfg(10.0, 512), 480, 16_384), 1_472.0);
+        assert_eq!(target_level(&cfg(10.0, 128), 480, 16_384), 1_088.0);
+        assert_eq!(target_level(&cfg(1.0, 64), 64, 16_384), 192.0);
+    }
+
+    #[test]
+    fn the_target_never_eats_the_overrun_headroom() {
+        assert_eq!(target_level(&cfg(500.0, 512), 480, 16_384), 8_192.0);
+        assert_eq!(target_level(&cfg(30.0, 65_536), 480, 2_048), 1_024.0);
+    }
+
+    #[test]
+    fn capacity_leaves_room_above_the_target() {
+        assert_eq!(ring_capacity_for_target(1_440), 8_192);
+        assert_eq!(ring_capacity_for_target(240), 2_048);
+        assert_eq!(ring_capacity_for_target(5_760), 32_768);
+        for target in [96usize, 480, 1_440, 2_400, 5_760] {
+            assert!(ring_capacity_for_target(target) >= 2 * target);
+        }
+    }
+
+    #[test]
+    fn a_broken_target_is_refused_not_clamped() {
+        let (_tx, rx) = deviceout_core::ring(4_096, 2);
+        assert!(validate(&rx, &cfg(0.0, 512)).is_err());
+        assert!(validate(&rx, &cfg(f64::NAN, 512)).is_err());
+        assert!(validate(&rx, &cfg(30.0, 512)).is_ok());
+    }
 
     #[test]
     fn backoff_grows_then_caps() {
