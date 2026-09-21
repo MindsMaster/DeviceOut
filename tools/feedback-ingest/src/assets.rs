@@ -3,13 +3,16 @@ use std::sync::OnceLock;
 
 const EMBED_CSS: &str = include_str!("../static/dash.css");
 const EMBED_JS: &str = include_str!("../static/dash.js");
+const EMBED_TS_JS: &str = include_str!("../static/ts.js");
 
 static CSS: OnceLock<String> = OnceLock::new();
 static JS: OnceLock<String> = OnceLock::new();
+static TS_JS: OnceLock<String> = OnceLock::new();
 
 pub fn warmup() {
     let _ = css();
     let _ = js();
+    let _ = ts_js();
 }
 
 pub fn css() -> &'static str {
@@ -18,6 +21,10 @@ pub fn css() -> &'static str {
 
 pub fn js() -> &'static str {
     JS.get_or_init(|| load("dash.js", EMBED_JS))
+}
+
+pub fn ts_js() -> &'static str {
+    TS_JS.get_or_init(|| load("ts.js", EMBED_TS_JS))
 }
 
 fn load(name: &str, embedded: &str) -> String {

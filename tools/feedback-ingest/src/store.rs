@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use crate::util::{day_key, fmt_epoch, iso_ts, parse_day_key};
+use crate::util::{day_key, iso_ts, parse_day_key};
 
 pub const PING_KEEP_SECS: u64 = 30 * 86400;
 
@@ -120,12 +120,12 @@ pub fn ticket_id() -> String {
     format!("DO-{n:x}")
 }
 
-pub fn ticket_time(ticket: &str) -> String {
+pub fn ticket_ms(ticket: &str) -> u64 {
     ticket
         .strip_prefix("DO-")
         .and_then(|h| u128::from_str_radix(h, 16).ok())
-        .map(|ms| fmt_epoch((ms / 1000) as u64))
-        .unwrap_or_else(|| "-".into())
+        .map(|ms| ms as u64)
+        .unwrap_or(0)
 }
 
 pub fn forward(dir: &Path, payload: &Payload, ticket: &str, ip: &str) -> bool {

@@ -7,10 +7,10 @@ use crate::config::{Config, Hit, Limits};
 use crate::http::{Request, Response};
 use crate::index::Index;
 use crate::stats::{compute_stats, pairs_json, Window};
-use crate::store::{list_tickets, load_ticket, safe_ticket, ticket_time, valid_ticket_id, Stored};
+use crate::store::{list_tickets, load_ticket, safe_ticket, ticket_ms, valid_ticket_id, Stored};
 use crate::util::{
-    b64, client_ip, ct_eq, esc, header_value, html, json_ok, now_epoch, over_limit, prune, text,
-    Resp,
+    b64, client_ip, ct_eq, esc, header_value, html, json_ok, now_epoch, over_limit, parse_offset,
+    prune, query_of, query_param, text, Resp,
 };
 
 const DELETE_MAX_BODY: usize = 4096;
@@ -43,7 +43,7 @@ fn handle_admin(
     }
     let rest = rest.trim_start_matches('/');
     let prefix = format!("/deviceout-feedback/{}", cfg.admin_path);
-    let view = View::default();
+    let view = View::from_target(&req.target);
     if rest.is_empty() {
         return html(admin_index(cfg, index, &prefix, view));
     }
@@ -174,7 +174,7 @@ fn ticket_rows(dir: &Path) -> Vec<serde_json::Value> {
                 "ticket": item.ticket,
                 "kind": item.kind,
                 "version": item.version,
-                "time": ticket_time(&item.ticket),
+                "ts": ticket_ms(&item.ticket),
                 "ip": item.ip,
                 "contact": item.contact.unwrap_or_default(),
                 "message": item.message,
@@ -190,11 +190,12 @@ pub struct View {
     pub window: Window,
 }
 
-impl Default for View {
-    fn default() -> Self {
+impl View {
+    fn from_target(target: &str) -> Self {
+        let query = query_of(target);
         Self {
-            offset_min: 0,
-            window: Window::parse(None),
+            offset_min: parse_offset(query_param(query, "tzoff")),
+            window: Window::parse(query_param(query, "window")),
         }
     }
 }
@@ -242,10 +243,13 @@ fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> 
     out.push_str("<style>");
     out.push_str(assets::css());
     out.push_str("</style></head><body><div class=\"wrap\">");
+    out.push_str("<header class=\"top\"><h1>DeviceOut</h1><div class=\"tools\">");
+    out.push_str("<select id=\"tz\" class=\"sel\"></select>");
+    out.push_str("<select id=\"win\" class=\"sel\"></select>");
     out.push_str(&format!(
-        "<header class=\"top\"><h1>DeviceOut</h1>\
-         <div class=\"live\"><span class=\"dot\"></span><span id=\"n-live\">{online}</span></div></header>"
+        "<div class=\"live\"><span class=\"dot\"></span><span id=\"n-live\">{online}</span></div>"
     ));
+    out.push_str("</div></header>");
     out.push_str("<section class=\"cards\">");
     for (id, label, cls, value) in [
         ("n-users", "累计用户", "", users),
@@ -267,7 +271,8 @@ fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> 
     out.push_str("<section class=\"grid2\">");
     for (title, id) in [("版本", "ver"), ("系统", "os"), ("语言", "loc"), ("地区", "reg")] {
         out.push_str(&format!(
-            "<div class=\"card\"><h2>{title}</h2><div class=\"chart\"><canvas id=\"{id}\"></canvas></div></div>"
+            "<div class=\"card\"><h2>{title}<span class=\"sub cohort\"></span></h2>\
+             <div class=\"chart\"><canvas id=\"{id}\"></canvas></div></div>"
         ));
     }
     out.push_str("</section>");
@@ -281,6 +286,8 @@ fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> 
     out.push_str(";const DATA = ");
     out.push_str(&data);
     out.push_str(";</script><script>");
+    out.push_str(assets::ts_js());
+    out.push_str("</script><script>");
     out.push_str(assets::js());
     out.push_str("</script></body></html>");
     out
@@ -314,7 +321,7 @@ fn admin_detail(item: &Stored, prefix: &str) -> String {
     out.push_str(&format!(
         "<div class=\"card\"><div class=\"dhead\"><h1 class=\"mono\">{}</h1>{}<span style=\"margin-left:auto\">{}</span></div>\
          <div class=\"meta\">\
-         <div><div class=\"k\">时间</div><div class=\"v\">{}</div></div>\
+         <div><div class=\"k\">时间</div><div class=\"v ts\" data-ts=\"{}\">-</div></div>\
          <div><div class=\"k\">IP</div><div class=\"v mono\">{}</div></div>\
          <div><div class=\"k\">ID</div><div class=\"v mono\">{}</div></div>\
          <div><div class=\"k\">版本</div><div class=\"v mono\">{}</div></div>\
@@ -323,7 +330,7 @@ fn admin_detail(item: &Stored, prefix: &str) -> String {
         esc(&item.ticket),
         kind_pill(&item.kind),
         delete_form(prefix, &item.ticket),
-        ticket_time(&item.ticket),
+        ticket_ms(&item.ticket),
         esc(&item.ip),
         esc(&item.feedback_id),
         version,
@@ -334,6 +341,8 @@ fn admin_detail(item: &Stored, prefix: &str) -> String {
         esc(&item.message)
     ));
     out.push_str(&diag_section);
-    out.push_str("</div></body></html>");
+    out.push_str("</div><script>");
+    out.push_str(assets::ts_js());
+    out.push_str("</script></body></html>");
     out
 }

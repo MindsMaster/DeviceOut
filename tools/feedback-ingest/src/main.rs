@@ -126,3 +126,125 @@ fn maintain(cfg: &Config, state: &Mutex<Limits>, index: &Mutex<Index>) {
     daily::rollup(&cfg.dir, idx.devices(), now);
     prune_old_pings(&cfg.dir, now);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+
+    use util::b64;
+
+    const ADMIN: &str = "abcdefghijklmnop";
+    const PING: &str = r#"{"telemetry_id":"abc123","version":"1.1.1","os":"Windows 11 26100","arch":"x86_64","locale":"zh-CN","tz":"China Standard Time"}"#;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("fb-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn start(dir: &Path, ping_rate: u32) -> SocketAddr {
+        let cfg = Arc::new(Config {
+            token: Some("tok".into()),
+            admin_password: Some("pw".into()),
+            admin_path: ADMIN.into(),
+            dir: dir.to_path_buf(),
+            kill: false,
+            rate_ip_hour: 100,
+            rate_id_day: 100,
+            admin_fail_hour: 100,
+            ping_rate_ip_hour: ping_rate,
+            max_files: 100,
+        });
+        let state = Arc::new(Mutex::new(Limits {
+            by_ip: HashMap::new(),
+            by_id: HashMap::new(),
+            admin_fail_ip: HashMap::new(),
+            ping_by_ip: HashMap::new(),
+            last_maintenance: Instant::now(),
+        }));
+        let index = Arc::new(Mutex::new(Index::load(dir, now_epoch())));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handler: Handler = Arc::new(move |req: Request| route(&req, &cfg, &state, &index));
+        std::thread::spawn(move || http::serve(listener, 2, http::Limits::default(), handler));
+        addr
+    }
+
+    fn talk(addr: SocketAddr, raw: &str) -> String {
+        let mut s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        s.write_all(raw.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn post_ping(addr: SocketAddr, token: &str) -> String {
+        talk(
+            addr,
+            &format!(
+                "POST /ping HTTP/1.1\r\nHost: a\r\nX-DeviceOut-Token: {token}\r\nContent-Length: {}\r\n\r\n{PING}",
+                PING.len()
+            ),
+        )
+    }
+
+    fn dashboard(addr: SocketAddr, query: &str) -> serde_json::Value {
+        let reply = talk(
+            addr,
+            &format!(
+                "GET /deviceout-feedback/{ADMIN}/data?{query} HTTP/1.1\r\nHost: a\r\nAuthorization: Basic {}\r\n\r\n",
+                b64("admin:pw")
+            ),
+        );
+        let body = reply.split("\r\n\r\n").nth(1).unwrap_or_default();
+        serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}: {reply}"))
+    }
+
+    #[test]
+    fn every_heartbeat_reaches_the_dashboard() {
+        let dir = temp("route-ping");
+        let addr = start(&dir, 100);
+        for _ in 0..3 {
+            let reply = post_ping(addr, "tok");
+            assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
+            assert!(reply.contains("\"next\":300"), "{reply}");
+        }
+        let data = dashboard(addr, "tzoff=480&window=30d");
+        assert_eq!(data["users"], 1);
+        assert_eq!(data["active"], 1);
+        assert_eq!(data["online"], 1);
+        assert_eq!(data["today"], 1);
+        assert_eq!(data["cohort"], 1);
+        assert_eq!(data["window"], "30d");
+        assert_eq!(data["os"]["labels"][0], "Windows 11");
+        assert_eq!(data["os"]["values"][0], 1);
+
+        let log = std::fs::read_to_string(pings_file(&dir, now_epoch())).unwrap();
+        assert_eq!(log.lines().count(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_flood_is_refused_with_a_retry_hint() {
+        let dir = temp("route-rate");
+        let addr = start(&dir, 1);
+        assert!(post_ping(addr, "tok").starts_with("HTTP/1.1 200 OK"));
+        let reply = post_ping(addr, "tok");
+        assert!(reply.starts_with("HTTP/1.1 429 "), "{reply}");
+        assert!(reply.contains("Retry-After: 300\r\n"), "{reply}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ping_without_the_token_is_turned_away() {
+        let dir = temp("route-token");
+        let addr = start(&dir, 100);
+        let reply = post_ping(addr, "wrong");
+        assert!(reply.starts_with("HTTP/1.1 401 "), "{reply}");
+        assert!(!pings_file(&dir, now_epoch()).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

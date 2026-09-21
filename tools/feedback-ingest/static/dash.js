@@ -1,5 +1,7 @@
 var pal = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#a3a3a3', '#14b8a6', '#f97316', '#64748b'];
 var charts = {};
+var TZ_CHOICES = [['auto', '自动'], ['480', 'UTC+8'], ['540', 'UTC+9'], ['420', 'UTC+7'], ['0', 'UTC+0'], ['60', 'UTC+1'], ['-300', 'UTC-5'], ['-480', 'UTC-8']];
+var WIN_CHOICES = [['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天'], ['all', '全部']];
 
 function setText(id, v) {
   var el = document.getElementById(id);
@@ -39,7 +41,7 @@ function renderRows(rows) {
     var contact = r.contact ? esc(r.contact) : '-';
     return '<tr><td class="mono"><a href="' + esc(PREFIX) + '/' + esc(r.ticket) + '">' + esc(r.ticket) + '</a></td>' +
       '<td>' + pill(r.kind) + '</td><td class="muted">' + ver + '</td>' +
-      '<td class="muted">' + esc(r.time) + '</td><td class="mono">' + esc(r.ip) + '</td>' +
+      '<td class="muted">' + esc(fmtTs(r.ts)) + '</td><td class="mono">' + esc(r.ip) + '</td>' +
       '<td>' + contact + '</td><td><span class="excerpt" title="' + esc(r.message) + '">' + esc(r.preview) + '</span></td>' +
       '<td><form class="del" method="post" action="' + esc(PREFIX) + '/delete" onsubmit="return confirm(\'删除？\')">' +
       '<input type="hidden" name="ticket" value="' + esc(r.ticket) + '">' +
@@ -47,12 +49,20 @@ function renderRows(rows) {
   }).join('');
 }
 
+function setCohort(d) {
+  var text = (d.windowLabel || '') + ' · ' + Number(d.cohort || 0).toLocaleString() + ' 台';
+  var nodes = document.querySelectorAll('.cohort');
+  for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
+}
+
 function apply(d) {
   setText('n-users', d.users);
+  setText('n-active', d.active);
   setText('n-online', d.online);
   setText('n-today', d.today);
   setText('n-tickets', d.tickets);
   setText('n-live', d.online);
+  setCohort(d);
   setPair(charts.trend, d.trend);
   setPair(charts.ver, d.versions);
   setPair(charts.os, d.os);
@@ -62,10 +72,25 @@ function apply(d) {
 }
 
 function poll() {
-  fetch(PREFIX + '/data', { credentials: 'same-origin' })
+  var url = PREFIX + '/data?tzoff=' + tzOffset() + '&window=' + encodeURIComponent(tzLoad('win', '30d'));
+  fetch(url, { credentials: 'same-origin' })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
     .then(apply)
     .catch(function () {});
+}
+
+function fillSelect(id, choices, key, fallback) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var current = tzLoad(key, fallback);
+  el.innerHTML = choices.map(function (c) {
+    return '<option value="' + esc(c[0]) + '"' + (c[0] === current ? ' selected' : '') + '>' + esc(c[1]) + '</option>';
+  }).join('');
+  el.onchange = function () {
+    tzSave(key, el.value);
+    paintTs();
+    poll();
+  };
 }
 
 if (window.Chart) {
@@ -104,5 +129,9 @@ if (window.Chart) {
     });
   }
 }
+fillSelect('tz', TZ_CHOICES, 'tz', 'auto');
+fillSelect('win', WIN_CHOICES, 'win', '30d');
 renderRows(DATA.rows);
-setInterval(poll, 8000);
+setCohort(DATA);
+poll();
+setInterval(poll, 5000);

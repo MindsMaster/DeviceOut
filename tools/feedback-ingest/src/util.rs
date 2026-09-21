@@ -7,6 +7,7 @@ use crate::http::{Request, Response};
 pub type Resp = Response;
 
 pub const UNKNOWN: &str = "未知";
+pub const MAX_OFFSET_MIN: i32 = 840;
 pub const OTHER: &str = "其他";
 
 pub fn normalize_path(url: &str) -> String {
@@ -177,14 +178,27 @@ pub fn parse_iso_ts(s: &str) -> Option<u64> {
     Some(days as u64 * 86_400 + h * 3600 + min * 60 + sec)
 }
 
+pub fn query_of(target: &str) -> &str {
+    target.split_once('?').map(|(_, q)| q).unwrap_or("")
+}
+
+pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then_some(v)
+    })
+}
+
+pub fn parse_offset(value: Option<&str>) -> i32 {
+    value
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .filter(|n| (-MAX_OFFSET_MIN..=MAX_OFFSET_MIN).contains(n))
+        .unwrap_or(0)
+}
+
 pub fn iso_ts(epoch: u64) -> String {
     let (y, m, d, h, min, s) = utc_parts(epoch);
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}Z")
-}
-
-pub fn fmt_epoch(epoch: u64) -> String {
-    let (y, m, d, h, min, _) = utc_parts(epoch);
-    format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02}")
 }
 
 pub fn esc(s: &str) -> String {
@@ -330,6 +344,20 @@ mod tests {
         assert_eq!(hour_label(epoch, 480), "20:00");
         assert_eq!(hour_label(epoch, -300), "07:00");
         assert_eq!(hour_start(epoch, 330) % 1_800, 0);
+    }
+
+    #[test]
+    fn query_values_are_read_and_bounded() {
+        assert_eq!(query_of("/x?a=1&b=2"), "a=1&b=2");
+        assert_eq!(query_of("/x"), "");
+        assert_eq!(query_param("a=1&b=2", "b"), Some("2"));
+        assert_eq!(query_param("a=1&b=2", "c"), None);
+        assert_eq!(query_param("", "a"), None);
+        assert_eq!(parse_offset(Some("-480")), -480);
+        assert_eq!(parse_offset(Some("480")), 480);
+        assert_eq!(parse_offset(Some("99999")), 0);
+        assert_eq!(parse_offset(Some("nope")), 0);
+        assert_eq!(parse_offset(None), 0);
     }
 
     #[test]
