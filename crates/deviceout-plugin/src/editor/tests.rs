@@ -177,6 +177,114 @@ fn render_body(snapshot: Option<UiState>, tab: usize) -> f32 {
 }
 
 #[test]
+fn a_blocked_step_never_prints_on_top_of_its_value() {
+    let ctx = egui::Context::default();
+    theme::install(&ctx);
+    let mut drag = None;
+    let mut time = 0.0;
+    let mut shapes: Vec<egui::epaint::TextShape> = Vec::new();
+    let mut arrow = egui::Pos2::ZERO;
+
+    for step in 0..4 {
+        time += 0.1;
+        let events = match step {
+            1 => vec![
+                egui::Event::PointerMoved(arrow),
+                egui::Event::PointerButton {
+                    pos: arrow,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            2 => vec![egui::Event::PointerButton {
+                pos: arrow,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            _ => Vec::new(),
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(crate::EDITOR_WIDTH as f32, crate::EDITOR_HEIGHT as f32),
+            )),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(theme::root_frame())
+                .show(ctx, |ui| {
+                    theme::card_frame().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        widgets::settings_row(ui, t().heading_target_latency, |ui| {
+                            widgets::number_combo(
+                                ui,
+                                "target_ms",
+                                widgets::NumberCombo {
+                                    width: COMBO_WIDTH,
+                                    value: 50,
+                                    floor: 35,
+                                    ceiling: MAX_TARGET_MS,
+                                    steps: TARGET_MS_STEPS,
+                                    unit: MS,
+                                    blocked: t().step_unavailable,
+                                    scrub: true,
+                                },
+                                &mut drag,
+                            );
+                        });
+                    });
+                });
+        });
+        shapes.clear();
+        for clipped in output.shapes {
+            collect_text(clipped.shape, &mut shapes);
+        }
+        if step == 0 {
+            let unit = shapes
+                .iter()
+                .find(|text| text.galley.job.text == MS)
+                .expect("the combo prints its unit");
+            arrow = egui::pos2(
+                unit.pos.x + unit.galley.rect.width() + 26.0,
+                unit.pos.y + 6.0,
+            );
+        }
+    }
+
+    let blocked = t().step_unavailable;
+    let hints: Vec<_> = shapes
+        .iter()
+        .filter(|text| text.galley.job.text == blocked)
+        .collect();
+    assert_eq!(hints.len(), 3, "expected 10, 20 and 30 ms to be blocked");
+
+    for hint in hints {
+        let row = hint.pos.y;
+        let label = shapes
+            .iter()
+            .filter(|text| text.galley.job.text != blocked)
+            .find(|text| (text.pos.y - row).abs() < 6.0)
+            .expect("every hint sits beside a value");
+        assert!(
+            label.pos.x + label.galley.rect.width() <= hint.pos.x,
+            "{:?} reaches {} but the hint starts at {}",
+            label.galley.job.text,
+            label.pos.x + label.galley.rect.width(),
+            hint.pos.x
+        );
+        assert!(
+            hint.pos.x + hint.galley.rect.width() <= crate::EDITOR_WIDTH as f32,
+            "the hint runs past the window"
+        );
+    }
+}
+
+#[test]
 fn every_tab_fits_the_plugin_window() {
     let budget = crate::EDITOR_HEIGHT as f32 - 32.0;
     for tab in 0..3 {

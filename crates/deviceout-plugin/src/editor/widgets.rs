@@ -340,6 +340,10 @@ const PX_PER_STEP: f32 = 4.0;
 const TAB_HEIGHT: f32 = 34.0;
 const TAB_PAD: f32 = 3.0;
 const ROW_HEIGHT: f32 = 40.0;
+const MENU_EDGE: f32 = 26.0;
+const MENU_MARGIN: f32 = 6.0;
+const OPTION_PAD: f32 = 10.0;
+const OPTION_GAP: f32 = 14.0;
 const LABEL_SHARE: f32 = 0.55;
 
 pub(crate) fn number_combo(
@@ -456,6 +460,8 @@ pub(crate) fn number_combo(
 
     if open {
         let screen = ui.ctx().screen_rect();
+        let room_left = (rect.right() - screen.left() - MENU_EDGE).max(1.0);
+        let menu_width = menu_width(&painter, &combo, width - 14.0).min(room_left);
         let wanted = combo.steps.len() as f32 * 32.0 + 12.0;
         let below = (screen.bottom() - rect.bottom() - 13.0).max(0.0);
         let above = (rect.top() - screen.top() - 13.0).max(0.0);
@@ -469,7 +475,13 @@ pub(crate) fn number_combo(
             egui::AboveOrBelow::Above => above,
         };
         let mut anchor = arrow.clone();
-        anchor.rect = rect.expand2(Vec2::new(0.0, 5.0));
+        anchor.rect = Rect::from_min_max(
+            Pos2::new(
+                rect.right() - menu_width - MENU_MARGIN * 2.0,
+                rect.top() - 5.0,
+            ),
+            Pos2::new(rect.right(), rect.bottom() + 5.0),
+        );
         ui.scope(|ui| {
             let style = ui.style_mut();
             style.spacing.menu_margin = egui::Margin::same(6);
@@ -489,7 +501,7 @@ pub(crate) fn number_combo(
                 placement,
                 egui::PopupCloseBehavior::CloseOnClickOutside,
                 |ui| {
-                    ui.set_width((width - 14.0).max(1.0));
+                    ui.set_width(menu_width);
                     ui.spacing_mut().item_spacing.y = 2.0;
                     let mut scroll = egui::style::ScrollStyle::floating();
                     scroll.bar_width = 6.0;
@@ -529,6 +541,31 @@ pub(crate) fn number_combo(
     picked.filter(|&v| v != combo.value)
 }
 
+fn menu_width(painter: &egui::Painter, combo: &NumberCombo<'_>, trigger: f32) -> f32 {
+    let mut wanted = trigger.max(1.0);
+    for &step in combo.steps {
+        let label = format!("{step} {}", combo.unit);
+        let mut need = painter
+            .layout_no_wrap(label, FontId::monospace(12.5), theme::TEXT)
+            .size()
+            .x
+            + OPTION_PAD * 2.0;
+        if step < combo.floor {
+            need += painter
+                .layout_no_wrap(
+                    combo.blocked.to_string(),
+                    FontId::proportional(10.5),
+                    theme::TEXT_FAINT,
+                )
+                .size()
+                .x
+                + OPTION_GAP;
+        }
+        wanted = wanted.max(need);
+    }
+    wanted
+}
+
 fn combo_option(ui: &mut egui::Ui, label: &str, hint: Option<&str>, selected: bool) -> Response {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::click());
@@ -546,7 +583,7 @@ fn combo_option(ui: &mut egui::Ui, label: &str, hint: Option<&str>, selected: bo
         };
         painter.rect_filled(rect, theme::CORNER_SMALL, fill);
         painter.text(
-            Pos2::new(rect.left() + 10.0, rect.center().y),
+            Pos2::new(rect.left() + OPTION_PAD, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
             FontId::monospace(12.5),
@@ -554,7 +591,7 @@ fn combo_option(ui: &mut egui::Ui, label: &str, hint: Option<&str>, selected: bo
         );
         if let Some(hint) = hint {
             painter.text(
-                Pos2::new(rect.right() - 10.0, rect.center().y),
+                Pos2::new(rect.right() - OPTION_PAD, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 hint,
                 FontId::proportional(10.5),
