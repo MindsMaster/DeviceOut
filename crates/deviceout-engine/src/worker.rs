@@ -46,6 +46,9 @@ impl Default for EngineConfig {
 pub const DEFAULT_TARGET_MS: f64 = 30.0;
 pub const DEFAULT_BLOCK_FRAMES: usize = 512;
 
+pub const ASSUMED_PERIOD_MS: f64 = 10.0;
+pub const ASSUMED_RESAMPLER_MS: f64 = 3.0;
+
 const CAPACITY_FACTOR: usize = 4;
 const MIN_CAPACITY_FRAMES: usize = 2_048;
 const PERIOD_MARGIN: usize = 2;
@@ -67,6 +70,16 @@ pub fn min_target_frames(max_block_frames: usize, period_frames: usize) -> usize
     (max_block_frames + PERIOD_MARGIN * period_frames).max(1)
 }
 
+pub fn min_total_ms(max_block_frames: usize, source_rate_hz: f64, queue_periods: u32) -> f64 {
+    let periods = queue_periods.clamp(
+        deviceout_sink::MIN_QUEUE_PERIODS,
+        deviceout_sink::MAX_QUEUE_PERIODS,
+    );
+    let period = frames_for_ms(ASSUMED_PERIOD_MS, source_rate_hz);
+    let ring = ms_of(min_target_frames(max_block_frames, period), source_rate_hz);
+    ring + ASSUMED_PERIOD_MS * f64::from(periods) + ASSUMED_RESAMPLER_MS
+}
+
 pub fn ring_capacity_for_target(target_frames: usize) -> usize {
     target_frames
         .saturating_mul(CAPACITY_FACTOR)
@@ -83,11 +96,35 @@ fn settle_wait(config: &EngineConfig) -> f64 {
     config.tuning.settle_time_s * scale
 }
 
-fn target_level(config: &EngineConfig, period_frames: usize, capacity_frames: usize) -> (f64, usize) {
+pub fn ms_of(frames: usize, rate_hz: f64) -> f64 {
+    if !rate_hz.is_finite() || rate_hz <= 0.0 {
+        return 0.0;
+    }
+    frames as f64 * 1.0e3 / rate_hz
+}
+
+fn target_level(
+    config: &EngineConfig,
+    period_frames: usize,
+    capacity_frames: usize,
+    downstream_ms: f64,
+) -> TargetLevel {
     let ceiling = (capacity_frames / 2).max(1);
     let floor = min_target_frames(config.max_block_frames, period_frames).min(ceiling);
-    let target = frames_for_ms(config.target_ms, config.source_rate_hz).clamp(floor, ceiling);
-    (target as f64, floor)
+    let ring_ms = (config.target_ms - downstream_ms).max(0.0);
+    let frames = frames_for_ms(ring_ms, config.source_rate_hz).clamp(floor, ceiling);
+    TargetLevel {
+        frames: frames as f64,
+        floor,
+        total_floor_ms: ms_of(floor, config.source_rate_hz) + downstream_ms,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TargetLevel {
+    frames: f64,
+    floor: usize,
+    total_floor_ms: f64,
 }
 
 pub trait OpenSink: Send + 'static {
@@ -337,13 +374,20 @@ impl<S: AudioSink> Worker<S> {
         let period_frames = sink.period_frames();
         let nominal_ratio = sink_rate / config.source_rate_hz;
         let period_source_frames = ((period_frames as f64 / nominal_ratio).ceil() as usize).max(1);
-        let (target_frames, min_target) =
-            target_level(config, period_source_frames, rx.capacity_frames());
+
+        let resampler =
+            DriftResampler::new(channels, period_frames, nominal_ratio, &config.tuning)?;
+        let downstream_frames = sink.queue_limit_frames() + resampler.output_delay();
+        let level = target_level(
+            config,
+            period_source_frames,
+            rx.capacity_frames(),
+            ms_of(downstream_frames, sink_rate),
+        );
+        let target_frames = level.frames;
 
         let mut ctrl = DriftController::new(target_frames, sink_rate, nominal_ratio, config.tuning);
         ctrl.seed_drift_ppm(config.initial_drift_ppm);
-        let resampler =
-            DriftResampler::new(channels, period_frames, nominal_ratio, &config.tuning)?;
 
         let pull_buf = vec![0.0f32; resampler.input_frames_max() * channels];
         let out_buf = vec![0.0f32; resampler.output_frames() * channels];
@@ -357,7 +401,12 @@ impl<S: AudioSink> Worker<S> {
             resampler_delay_frames: resampler.output_delay(),
             exclusive: sink.exclusive(),
         });
-        metrics.set_target(target_frames, min_target, settle_wait(config));
+        metrics.set_target(
+            target_frames,
+            level.floor,
+            level.total_floor_ms,
+            settle_wait(config),
+        );
 
         Ok(Self {
             sink,
@@ -490,26 +539,52 @@ mod tests {
         }
     }
 
+    fn level(
+        target_ms: f64,
+        block: usize,
+        period: usize,
+        capacity: usize,
+        downstream_ms: f64,
+    ) -> TargetLevel {
+        target_level(&cfg(target_ms, block), period, capacity, downstream_ms)
+    }
+
     #[test]
     fn the_target_follows_the_requested_milliseconds() {
-        assert_eq!(target_level(&cfg(30.0, 128), 480, 16_384).0, 1_440.0);
-        assert_eq!(target_level(&cfg(50.0, 128), 480, 16_384).0, 2_400.0);
-        assert_eq!(target_level(&cfg(120.0, 128), 480, 32_768).0, 5_760.0);
+        assert_eq!(level(30.0, 128, 480, 16_384, 0.0).frames, 1_440.0);
+        assert_eq!(level(50.0, 128, 480, 16_384, 0.0).frames, 2_400.0);
+        assert_eq!(level(120.0, 128, 480, 32_768, 0.0).frames, 5_760.0);
+    }
+
+    #[test]
+    fn the_device_and_resampler_come_out_of_the_ring() {
+        assert_eq!(level(50.0, 128, 480, 16_384, 20.0).frames, 1_440.0);
+        assert_eq!(level(80.0, 128, 480, 16_384, 20.0).frames, 2_880.0);
+        assert_eq!(level(120.0, 128, 480, 32_768, 22.5).frames, 4_680.0);
+    }
+
+    #[test]
+    fn the_floor_it_reports_is_what_the_user_can_actually_ask_for() {
+        let l = level(30.0, 512, 480, 16_384, 20.0);
+        assert_eq!(l.floor, 1_472);
+        assert!((l.total_floor_ms - (1_472.0 * 1.0e3 / 48_000.0 + 20.0)).abs() < 1.0e-9);
     }
 
     #[test]
     fn the_target_never_dips_below_one_block_plus_two_periods() {
         assert_eq!(min_target_frames(512, 480), 1_472);
-        assert_eq!(target_level(&cfg(30.0, 512), 480, 16_384), (1_472.0, 1_472));
-        assert_eq!(target_level(&cfg(10.0, 512), 480, 16_384), (1_472.0, 1_472));
-        assert_eq!(target_level(&cfg(10.0, 128), 480, 16_384), (1_088.0, 1_088));
-        assert_eq!(target_level(&cfg(1.0, 64), 64, 16_384), (192.0, 192));
+        assert_eq!(level(30.0, 512, 480, 16_384, 0.0).frames, 1_472.0);
+        assert_eq!(level(10.0, 512, 480, 16_384, 0.0).frames, 1_472.0);
+        assert_eq!(level(10.0, 128, 480, 16_384, 0.0).frames, 1_088.0);
+        assert_eq!(level(1.0, 64, 64, 16_384, 0.0).frames, 192.0);
+        assert_eq!(level(50.0, 512, 480, 16_384, 40.0).frames, 1_472.0);
     }
 
     #[test]
     fn the_target_never_eats_the_overrun_headroom() {
-        assert_eq!(target_level(&cfg(500.0, 512), 480, 16_384).0, 8_192.0);
-        assert_eq!(target_level(&cfg(30.0, 65_536), 480, 2_048), (1_024.0, 1_024));
+        assert_eq!(level(500.0, 512, 480, 16_384, 0.0).frames, 8_192.0);
+        let l = level(30.0, 65_536, 480, 2_048, 0.0);
+        assert_eq!((l.frames, l.floor), (1_024.0, 1_024));
     }
 
     #[test]

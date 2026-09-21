@@ -64,6 +64,7 @@ pub struct EngineMetrics {
     capacity_frames: AtomicU64,
     target_frames: AtomicU64,
     min_target_frames: AtomicU64,
+    floor_ms: AtomicU64,
     exclusive: AtomicBool,
     smoothed_fill: AtomicU64,
     drift_ppm: AtomicU64,
@@ -113,6 +114,7 @@ impl EngineMetrics {
             capacity_frames: AtomicU64::new(0),
             target_frames: AtomicU64::new(0),
             min_target_frames: AtomicU64::new(0),
+            floor_ms: AtomicU64::new(0),
             exclusive: AtomicBool::new(false),
             smoothed_fill: AtomicU64::new(0),
             drift_ppm: AtomicU64::new(0),
@@ -185,11 +187,13 @@ impl EngineMetrics {
         &self,
         target_frames: f64,
         min_target_frames: usize,
+        floor_ms: f64,
         settled_after_s: f64,
     ) {
         store_f64(&self.target_frames, target_frames);
         self.min_target_frames
             .store(min_target_frames as u64, Ordering::Relaxed);
+        store_f64(&self.floor_ms, floor_ms);
         store_f64(&self.settled_after_s, settled_after_s);
     }
 
@@ -249,6 +253,10 @@ impl EngineMetrics {
 
     pub fn min_target_frames(&self) -> u64 {
         self.min_target_frames.load(Ordering::Relaxed)
+    }
+
+    pub fn floor_ms(&self) -> f64 {
+        load_f64(&self.floor_ms)
     }
 
     pub fn target_fraction(&self) -> f64 {

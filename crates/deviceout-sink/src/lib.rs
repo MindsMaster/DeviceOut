@@ -27,6 +27,9 @@ pub trait AudioSink: Send {
     fn format(&self) -> StreamFormat;
     fn period_frames(&self) -> usize;
     fn buffer_frames(&self) -> usize;
+    fn queue_limit_frames(&self) -> usize {
+        self.buffer_frames()
+    }
     fn prefill_silence(&mut self) -> Result<usize, SinkError>;
     fn exclusive(&self) -> bool {
         false

@@ -5,7 +5,7 @@ use parking_lot::{Mutex, RwLock};
 
 use deviceout_core::{ring, RingConsumer, RingProducer};
 use deviceout_engine::{
-    frames_for_ms, min_target_frames, ring_capacity_for_target, start, EngineConfig, EngineHandle,
+    frames_for_ms, min_total_ms, ring_capacity_for_target, start, EngineConfig, EngineHandle,
     EngineMetrics,
 };
 
@@ -13,8 +13,6 @@ pub(crate) const DEFAULT_TARGET_MS: u32 = 30;
 pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 50, 80, 120];
 pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[2, 3, 4];
 pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 2;
-
-const ASSUMED_PERIOD_MS: f64 = 10.0;
 
 pub(crate) fn nearest_target_ms(ms: u32) -> u32 {
     TARGET_MS_STEPS
@@ -24,10 +22,12 @@ pub(crate) fn nearest_target_ms(ms: u32) -> u32 {
         .unwrap_or(DEFAULT_TARGET_MS)
 }
 
-pub(crate) fn min_target_ms(max_block_frames: u32, source_rate_hz: f64) -> u32 {
-    let period = frames_for_ms(ASSUMED_PERIOD_MS, source_rate_hz);
-    let frames = min_target_frames(max_block_frames as usize, period);
-    ms_ceil(frames, source_rate_hz)
+pub(crate) fn min_target_ms(max_block_frames: u32, source_rate_hz: f64, queue_periods: u32) -> u32 {
+    let ms = min_total_ms(max_block_frames as usize, source_rate_hz, queue_periods);
+    if !ms.is_finite() || ms <= 0.0 {
+        return DEFAULT_TARGET_MS;
+    }
+    ms.ceil() as u32
 }
 
 pub(crate) fn clamp_target_ms(ms: u32, floor: u32) -> u32 {
@@ -37,13 +37,6 @@ pub(crate) fn clamp_target_ms(ms: u32, floor: u32) -> u32 {
         .find(|&step| step >= floor)
         .unwrap_or(TARGET_MS_STEPS[TARGET_MS_STEPS.len() - 1]);
     nearest_target_ms(ms).max(floor)
-}
-
-pub(crate) fn ms_ceil(frames: usize, rate_hz: f64) -> u32 {
-    if !rate_hz.is_finite() || rate_hz <= 0.0 {
-        return DEFAULT_TARGET_MS;
-    }
-    (frames as f64 * 1.0e3 / rate_hz).ceil() as u32
 }
 
 #[derive(Debug, Default)]
@@ -75,6 +68,10 @@ impl EngineController {
     }
 
     pub(crate) fn target_floor_ms(&self) -> u32 {
+        let live = self.metrics().map_or(0.0, |m| m.floor_ms());
+        if live.is_finite() && live > 0.0 {
+            return live.ceil() as u32;
+        }
         self.target_floor_ms.load(Ordering::Relaxed)
     }
 
@@ -274,21 +271,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_floor_matches_what_the_engine_will_actually_clamp_to() {
-        assert_eq!(min_target_ms(512, 48_000.0), 31);
-        assert_eq!(min_target_ms(2048, 48_000.0), 63);
-        assert_eq!(min_target_ms(128, 44_100.0), 23);
-        assert_eq!(min_target_ms(65_536, 48_000.0), 1_386);
+    fn the_floor_counts_the_device_queue_and_the_resampler_too() {
+        assert_eq!(min_target_ms(512, 48_000.0, 2), 54);
+        assert_eq!(min_target_ms(2048, 48_000.0, 2), 86);
+        assert_eq!(min_target_ms(128, 44_100.0, 2), 46);
+        assert_eq!(min_target_ms(512, 48_000.0, 4), 74);
+        assert_eq!(min_target_ms(65_536, 48_000.0, 2), 1_409);
     }
 
     #[test]
     fn user_choice_snaps_to_a_step_but_never_below_the_floor() {
-        assert_eq!(clamp_target_ms(10, 31), 50);
-        assert_eq!(clamp_target_ms(10, 63), 80);
-        assert_eq!(clamp_target_ms(30, 23), 30);
-        assert_eq!(clamp_target_ms(0, 23), 30);
-        assert_eq!(clamp_target_ms(u32::MAX, 23), 120);
-        assert_eq!(clamp_target_ms(10, 1_386), 120);
+        assert_eq!(clamp_target_ms(10, 54), 80);
+        assert_eq!(clamp_target_ms(10, 86), 120);
+        assert_eq!(clamp_target_ms(80, 46), 80);
+        assert_eq!(clamp_target_ms(0, 46), 50);
+        assert_eq!(clamp_target_ms(u32::MAX, 46), 120);
+        assert_eq!(clamp_target_ms(10, 1_409), 120);
     }
 
     #[test]

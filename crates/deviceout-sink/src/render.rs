@@ -292,6 +292,10 @@ impl AudioSink for WasapiSink {
         self.buffer_frames as usize
     }
 
+    fn queue_limit_frames(&self) -> usize {
+        self.queue_limit
+    }
+
     fn exclusive(&self) -> bool {
         self.exclusive
     }

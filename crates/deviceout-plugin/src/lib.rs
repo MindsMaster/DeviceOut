@@ -153,7 +153,8 @@ impl Plugin for DeviceOut {
         };
         *self.params.device_id.write() = device_id.clone();
 
-        let floor = min_target_ms(buffer_config.max_buffer_size, source_rate);
+        let queue_periods = *self.params.queue_periods.read();
+        let floor = min_target_ms(buffer_config.max_buffer_size, source_rate, queue_periods);
         let requested = *self.params.target_ms.read();
         let target_ms = self.engine.initialize(
             EngineConfig {
@@ -161,7 +162,7 @@ impl Plugin for DeviceOut {
                 source_rate_hz: source_rate,
                 channels,
                 max_block_frames: buffer_config.max_buffer_size as usize,
-                device_queue_periods: *self.params.queue_periods.read(),
+                device_queue_periods: queue_periods,
                 exclusive: *self.params.exclusive.read(),
                 ..Default::default()
             },
