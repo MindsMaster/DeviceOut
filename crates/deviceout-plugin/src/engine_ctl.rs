@@ -14,6 +14,7 @@ pub(crate) const MAX_TARGET_MS: u32 = 1_000;
 pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 50, 80, 120, 200];
 pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[1, 2, 3, 4];
 pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 2;
+const DRIFT_CARRY_SANITY_PPM: f64 = 20_000.0;
 
 pub(crate) fn min_target_ms(max_block_frames: u32, source_rate_hz: f64, queue_periods: u32) -> u32 {
     let ms = min_total_ms(max_block_frames as usize, source_rate_hz, queue_periods);
@@ -34,6 +35,7 @@ struct Slot {
     handle: Option<EngineHandle>,
     config: Option<EngineConfig>,
     running_device: String,
+    carried_drift: Option<(String, f64)>,
 }
 
 #[derive(Debug, Default)]
@@ -88,7 +90,7 @@ impl EngineController {
 
         let mut producer = self.producer.lock();
         let mut slot = self.slot.lock();
-        if let Some(mut handle) = slot.handle.take() {
+        if let Some(mut handle) = self.retire(&mut slot) {
             handle.stop();
         }
         let config = EngineConfig {
@@ -97,11 +99,13 @@ impl EngineController {
         };
         let (tx, rx) = ring(capacity_for(&config), config.channels);
         *producer = Some(tx);
+        let carried = slot.carried_drift.take();
         *slot = Slot {
             consumer: Some(rx),
             handle: None,
             config: Some(config),
             running_device: String::new(),
+            carried_drift: carried,
         };
         self.restart(&mut producer, &mut slot);
         ms
@@ -109,12 +113,27 @@ impl EngineController {
 
     pub(crate) fn deactivate(&self) {
         let mut slot = self.slot.lock();
-        if let Some(mut handle) = slot.handle.take() {
-            self.remember_drift(&slot.running_device);
+        if let Some(mut handle) = self.retire(&mut slot) {
             slot.consumer = handle.stop();
         }
-        slot.running_device.clear();
         *self.metrics.write() = None;
+    }
+
+    fn retire(&self, slot: &mut Slot) -> Option<EngineHandle> {
+        let handle = slot.handle.take()?;
+        self.remember_drift(&slot.running_device);
+        if !slot.running_device.is_empty() {
+            if let Some(ppm) = self.live_drift_ppm() {
+                slot.carried_drift = Some((slot.running_device.clone(), ppm));
+            }
+        }
+        slot.running_device.clear();
+        Some(handle)
+    }
+
+    fn live_drift_ppm(&self) -> Option<f64> {
+        let ppm = self.metrics()?.drift_ppm();
+        (ppm.is_finite() && ppm.abs() <= DRIFT_CARRY_SANITY_PPM).then_some(ppm)
     }
 
     fn remember_drift(&self, device_id: &str) {
@@ -210,11 +229,9 @@ impl EngineController {
     fn apply_target_ms(&self, ms: u32) {
         let mut producer = self.producer.lock();
         let mut slot = self.slot.lock();
-        if let Some(mut handle) = slot.handle.take() {
-            self.remember_drift(&slot.running_device);
+        if let Some(mut handle) = self.retire(&mut slot) {
             handle.stop();
         }
-        slot.running_device.clear();
         let Some(config) = slot.config.as_mut() else {
             return;
         };
@@ -226,18 +243,17 @@ impl EngineController {
     }
 
     fn restart(&self, producer: &mut Option<RingProducer>, slot: &mut Slot) {
-        if let Some(mut handle) = slot.handle.take() {
-            self.remember_drift(&slot.running_device);
+        if let Some(mut handle) = self.retire(slot) {
             if let Some(consumer) = handle.stop() {
                 slot.consumer = Some(consumer);
             }
         }
-        slot.running_device.clear();
         let Some(mut config) = slot.config.clone() else {
             *self.metrics.write() = None;
             return;
         };
-        config.initial_drift_ppm = deviceout_update::recall_drift(&config.device_id);
+        config.initial_drift_ppm = carried_drift_ppm(slot, &config.device_id)
+            .unwrap_or_else(|| deviceout_update::recall_drift(&config.device_id));
         let consumer = match slot.consumer.take() {
             Some(c) => c,
             None => {
@@ -250,6 +266,13 @@ impl EngineController {
         let handle = start(consumer, config);
         *self.metrics.write() = Some(Arc::clone(handle.metrics()));
         slot.handle = Some(handle);
+    }
+}
+
+fn carried_drift_ppm(slot: &Slot, device_id: &str) -> Option<f64> {
+    match &slot.carried_drift {
+        Some((id, ppm)) if id.as_str() == device_id => Some(*ppm),
+        _ => None,
     }
 }
 
@@ -302,6 +325,29 @@ mod tests {
         assert_eq!(clamp_queue_periods(3), 3);
         assert_eq!(clamp_queue_periods(99), 4);
         assert_eq!(clamp_queue_periods(DEFAULT_QUEUE_PERIODS), 2);
+    }
+
+    fn carrying(device_id: &str, ppm: f64) -> Slot {
+        Slot {
+            carried_drift: Some((device_id.to_string(), ppm)),
+            ..Slot::default()
+        }
+    }
+
+    #[test]
+    fn a_restart_keeps_what_the_last_run_learned_about_the_same_device() {
+        assert_eq!(carried_drift_ppm(&Slot::default(), "cable"), None);
+
+        let slot = carrying("cable", -152.0);
+        assert_eq!(carried_drift_ppm(&slot, "cable"), Some(-152.0));
+        assert_eq!(carried_drift_ppm(&slot, "speakers"), None);
+    }
+
+    #[test]
+    fn a_reading_that_never_settled_is_still_worth_more_than_nothing() {
+        let seed = carried_drift_ppm(&carrying("cable", -41.5), "cable").unwrap_or(0.0);
+        assert!(seed.abs() > 0.0);
+        assert!(seed.abs() < DRIFT_CARRY_SANITY_PPM);
     }
 
     #[test]
