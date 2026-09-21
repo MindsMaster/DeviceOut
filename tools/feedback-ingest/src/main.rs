@@ -2,8 +2,10 @@ mod admin;
 mod api;
 mod assets;
 mod config;
+mod daily;
 mod geo;
 mod http;
+mod index;
 mod stats;
 mod store;
 mod util;
@@ -16,10 +18,11 @@ use std::time::{Duration, Instant};
 
 use config::{env_nonempty, env_u32, load_dotenv, load_or_create_admin_path, Config, Limits};
 use http::{Handler, Method, Request};
-use store::{count_lines, load_seen, pings_file, prune_old_pings};
+use index::Index;
+use store::{count_lines, pings_file, prune_old_pings};
 use util::{normalize_path, now_epoch, secure, text};
 
-const PING_PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
 const WORKERS: usize = 8;
 
 fn main() {
@@ -41,7 +44,7 @@ fn main() {
         rate_ip_hour: env_u32("FEEDBACK_RATE_IP_HOUR", 8),
         rate_id_day: env_u32("FEEDBACK_RATE_ID_DAY", 12),
         admin_fail_hour: env_u32("FEEDBACK_ADMIN_FAIL_HOUR", 8),
-        ping_rate_ip_hour: env_u32("FEEDBACK_PING_RATE_IP_HOUR", 30),
+        ping_rate_ip_hour: env_u32("FEEDBACK_PING_RATE_IP_HOUR", 240),
         max_files: env_u32("FEEDBACK_MAX_FILES", 500),
     };
     if cfg.token.is_none() {
@@ -52,11 +55,13 @@ fn main() {
     }
     let now = now_epoch();
     prune_old_pings(&cfg.dir, now);
-    let seen = load_seen(&cfg.dir);
+    let mut index = Index::load(&cfg.dir, now);
+    daily::rollup(&cfg.dir, index.devices(), now);
+    index.flush(&cfg.dir, true);
     let today_pings = count_lines(&pings_file(&cfg.dir, now));
     eprintln!(
-        "stats: {} known telemetry ids, {} pings today",
-        seen.len(),
+        "stats: {} known devices, {} pings today",
+        index.len(),
         today_pings
     );
     let listener = TcpListener::bind(&bind).expect("bind");
@@ -70,12 +75,12 @@ fn main() {
         by_id: HashMap::new(),
         admin_fail_ip: HashMap::new(),
         ping_by_ip: HashMap::new(),
-        ping_last: HashMap::new(),
-        last_ping_prune: Instant::now(),
+        last_maintenance: Instant::now(),
     }));
+    let index = Arc::new(Mutex::new(index));
 
     let cfg = Arc::new(cfg);
-    let handler: Handler = Arc::new(move |req: Request| route(&req, &cfg, &state));
+    let handler: Handler = Arc::new(move |req: Request| route(&req, &cfg, &state, &index));
     let limits = http::Limits {
         body_bytes: api::MAX_BODY,
         ..http::Limits::default()
@@ -85,25 +90,39 @@ fn main() {
     }
 }
 
-fn route(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> http::Response {
+fn route(
+    req: &Request,
+    cfg: &Config,
+    state: &Mutex<Limits>,
+    index: &Mutex<Index>,
+) -> http::Response {
     if cfg.kill {
         return secure(text(503, "disabled"));
     }
-    {
-        let mut st = state.lock().unwrap();
-        if st.last_ping_prune.elapsed() > PING_PRUNE_INTERVAL {
-            st.last_ping_prune = Instant::now();
-            prune_old_pings(&cfg.dir, now_epoch());
-        }
-    }
+    maintain(cfg, state, index);
     let path = normalize_path(&req.target);
     let delete_path = format!("/{}/delete", cfg.admin_path);
     let response = match req.method {
-        Method::Get | Method::Head => admin::handle_get(req, &path, cfg, state),
-        Method::Post if path == "/ping" => api::handle_ping(req, cfg, state),
+        Method::Get | Method::Head => admin::handle_get(req, &path, cfg, state, index),
+        Method::Post if path == "/ping" => api::handle_ping(req, cfg, state, index),
         Method::Post if path == delete_path => admin::handle_admin_delete(req, cfg, state),
         Method::Post => api::handle_post(req, cfg, state),
         Method::Other => text(405, "method"),
     };
     secure(response)
+}
+
+fn maintain(cfg: &Config, state: &Mutex<Limits>, index: &Mutex<Index>) {
+    {
+        let mut st = state.lock().unwrap();
+        if st.last_maintenance.elapsed() <= MAINTENANCE_INTERVAL {
+            return;
+        }
+        st.last_maintenance = Instant::now();
+    }
+    let now = now_epoch();
+    let mut idx = index.lock().unwrap();
+    idx.flush(&cfg.dir, true);
+    daily::rollup(&cfg.dir, idx.devices(), now);
+    prune_old_pings(&cfg.dir, now);
 }

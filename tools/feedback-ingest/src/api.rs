@@ -1,18 +1,19 @@
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::config::{Config, Hit, Limits};
 use crate::http::Request;
-use crate::store::{forward, store_ping, ticket_count, ticket_id, update_seen, Payload, PingPayload};
+use crate::index::Index;
+use crate::store::{forward, store_ping, ticket_count, ticket_id, Payload, PingPayload};
 use crate::util::{
-    client_ip, ct_eq, header_value, json_ok, now_epoch, ok_json, over_limit, prune, sanitize_field,
-    text, valid_telemetry_id, Resp,
+    client_ip, ct_eq, header_value, json_ok, now_epoch, over_limit, prune, sanitize_field, text,
+    valid_telemetry_id, Resp,
 };
 
 pub const MAX_BODY: usize = 48 * 1024;
+pub const PING_INTERVAL_SECS: u64 = 300;
 const DIAG_CAP: usize = 32 * 1024;
 const PING_MAX_BODY: usize = 8 * 1024;
-const PING_MIN_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 pub fn handle_post(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     let Some(expected) = cfg.token.as_deref() else {
@@ -25,7 +26,7 @@ pub fn handle_post(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
         let mut st = state.lock().unwrap();
         prune(&mut st);
         if over_limit(&st.by_ip, &ip, cfg.rate_ip_hour) {
-            return text(429, "rate");
+            return text(429, "rate").header("Retry-After", "3600");
         }
         st.by_ip
             .entry(ip.clone())
@@ -75,7 +76,7 @@ pub fn handle_post(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
         let mut st = state.lock().unwrap();
         prune(&mut st);
         if over_limit(&st.by_id, &payload.feedback_id, cfg.rate_id_day) {
-            return text(429, "rate");
+            return text(429, "rate").header("Retry-After", "3600");
         }
         st.by_id
             .entry(payload.feedback_id.clone())
@@ -90,7 +91,12 @@ pub fn handle_post(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     json_ok(&serde_json::json!({ "ticket": ticket }).to_string())
 }
 
-pub fn handle_ping(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+pub fn handle_ping(
+    req: &Request,
+    cfg: &Config,
+    state: &Mutex<Limits>,
+    index: &Mutex<Index>,
+) -> Resp {
     let Some(expected) = cfg.token.as_deref() else {
         return text(503, "disabled");
     };
@@ -104,7 +110,7 @@ pub fn handle_ping(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
         let mut st = state.lock().unwrap();
         prune(&mut st);
         if over_limit(&st.ping_by_ip, &ip, cfg.ping_rate_ip_hour) {
-            return text(429, "rate");
+            return text(429, "rate").header("Retry-After", &PING_INTERVAL_SECS.to_string());
         }
         st.ping_by_ip
             .entry(ip.clone())
@@ -127,28 +133,19 @@ pub fn handle_ping(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     ping.locale = sanitize_field(&ping.locale, 128);
     ping.tz = sanitize_field(&ping.tz, 128);
 
-    {
-        let mut st = state.lock().unwrap();
-        if let Some(last) = st.ping_last.get(&ping.telemetry_id) {
-            if last.elapsed() < PING_MIN_INTERVAL {
-                return ok_json();
-            }
-        }
-        st.ping_last
-            .insert(ping.telemetry_id.clone(), Instant::now());
-    }
-
     let now = now_epoch();
     if let Err(e) = store_ping(&cfg.dir, &ping, &ip, now) {
         eprintln!("ping store error: {e}");
         return text(500, "store");
     }
-    if let Err(e) = update_seen(&cfg.dir, &ping, &ip, now) {
-        eprintln!("seen update error: {e}");
+    {
+        let mut idx = index.lock().unwrap();
+        idx.record(&ping, &ip, now);
+        idx.flush(&cfg.dir, false);
     }
     eprintln!(
         "ping id={} v={} os={} ip={ip}",
         ping.telemetry_id, ping.version, ping.os
     );
-    ok_json()
+    json_ok(&serde_json::json!({ "ok": true, "next": PING_INTERVAL_SECS }).to_string())
 }

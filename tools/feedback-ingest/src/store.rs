@@ -1,15 +1,13 @@
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::util::{day_key, fmt_epoch, iso_ts, parse_day_key};
 
-pub const SEEN_CAP: usize = 50_000;
-pub const PING_KEEP_SECS: u64 = 90 * 86400;
+pub const PING_KEEP_SECS: u64 = 30 * 86400;
 
 #[derive(Deserialize)]
 pub struct Payload {
@@ -62,24 +60,6 @@ pub struct PingPayload {
     pub locale: String,
     #[serde(default)]
     pub tz: String,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-pub struct SeenEntry {
-    #[serde(default)]
-    pub first_seen: u64,
-    #[serde(default)]
-    pub last_seen: u64,
-    #[serde(default)]
-    pub version: String,
-    #[serde(default)]
-    pub locale: String,
-    #[serde(default)]
-    pub tz: String,
-    #[serde(default)]
-    pub ip: String,
-    #[serde(default)]
-    pub pings: u64,
 }
 
 pub fn list_tickets(dir: &Path) -> Vec<String> {
@@ -183,7 +163,7 @@ pub fn forward(dir: &Path, payload: &Payload, ticket: &str, ip: &str) -> bool {
     true
 }
 
-fn write_replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
@@ -206,13 +186,6 @@ pub fn count_lines(path: &Path) -> usize {
         .unwrap_or(0)
 }
 
-pub fn load_seen(dir: &Path) -> HashMap<String, SeenEntry> {
-    std::fs::read(dir.join("stats").join("seen.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
-}
-
 pub fn store_ping(dir: &Path, ping: &PingPayload, ip: &str, now: u64) -> std::io::Result<()> {
     std::fs::create_dir_all(dir.join("stats"))?;
     let line = serde_json::json!({
@@ -232,35 +205,6 @@ pub fn store_ping(dir: &Path, ping: &PingPayload, ip: &str, now: u64) -> std::io
         .open(pings_file(dir, now))?;
     writeln!(file, "{line}")?;
     Ok(())
-}
-
-pub fn update_seen(dir: &Path, ping: &PingPayload, ip: &str, now: u64) -> std::io::Result<()> {
-    let stats = dir.join("stats");
-    std::fs::create_dir_all(&stats)?;
-    let mut map = load_seen(dir);
-    let entry = map.entry(ping.telemetry_id.clone()).or_default();
-    if entry.first_seen == 0 {
-        entry.first_seen = now;
-    }
-    entry.last_seen = now;
-    entry.version = ping.version.clone();
-    entry.locale = ping.locale.clone();
-    entry.tz = ping.tz.clone();
-    entry.ip = ip.to_string();
-    entry.pings += 1;
-    if map.len() > SEEN_CAP {
-        let mut by_age: Vec<(u64, String)> = map
-            .iter()
-            .map(|(id, e)| (e.last_seen, id.clone()))
-            .collect();
-        by_age.sort();
-        let drop = map.len() - SEEN_CAP;
-        for (_, id) in by_age.into_iter().take(drop) {
-            map.remove(&id);
-        }
-    }
-    let bytes = serde_json::to_vec(&map)?;
-    write_replace(&stats.join("seen.json"), &bytes)
 }
 
 pub fn prune_old_pings(dir: &Path, now: u64) {
@@ -328,29 +272,6 @@ mod tests {
         assert!(!forward(&dir, &payload, "DO-1", "1.1.1.1"));
         assert_eq!(load_ticket(&dir, "DO-1").unwrap().message, "first");
         assert!(!dir.join("DO-1.json.tmp").exists());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn seen_roundtrip_and_eviction() {
-        let dir = std::env::temp_dir().join(format!("fb-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let ping = PingPayload {
-            telemetry_id: "dev-1".into(),
-            version: "0.1.0".into(),
-            os: "Windows 11".into(),
-            arch: "x86_64".into(),
-            locale: "zh-CN".into(),
-            tz: "China Standard Time".into(),
-        };
-        update_seen(&dir, &ping, "1.2.3.4", 1000).unwrap();
-        update_seen(&dir, &ping, "1.2.3.4", 2000).unwrap();
-        let seen = load_seen(&dir);
-        let e = &seen["dev-1"];
-        assert_eq!(e.first_seen, 1000);
-        assert_eq!(e.last_seen, 2000);
-        assert_eq!(e.pings, 2);
-        assert_eq!(e.version, "0.1.0");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

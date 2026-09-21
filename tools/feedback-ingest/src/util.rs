@@ -6,6 +6,9 @@ use crate::http::{Request, Response};
 
 pub type Resp = Response;
 
+pub const UNKNOWN: &str = "未知";
+pub const OTHER: &str = "其他";
+
 pub fn normalize_path(url: &str) -> String {
     let path = url.split('?').next().unwrap_or(url);
     let path = path.trim_end_matches('/');
@@ -19,10 +22,6 @@ pub fn normalize_path(url: &str) -> String {
 
 pub fn text(status: u16, body: &str) -> Resp {
     Response::text(status, body)
-}
-
-pub fn ok_json() -> Resp {
-    json_ok("{\"ok\":true}")
 }
 
 pub fn json_ok(body: &str) -> Resp {
@@ -131,9 +130,51 @@ pub fn date_prefix(epoch: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-pub fn hour_prefix(epoch: u64) -> String {
-    let (_, _, _, h, _, _) = utc_parts(epoch);
-    format!("{}T{h:02}", date_prefix(epoch))
+pub fn shifted(epoch: u64, offset_min: i32) -> u64 {
+    (epoch as i64 + offset_min as i64 * 60).max(0) as u64
+}
+
+fn bucket_start(epoch: u64, offset_min: i32, size: u64) -> u64 {
+    let local = shifted(epoch, offset_min);
+    let start = local - local % size;
+    (start as i64 - offset_min as i64 * 60).max(0) as u64
+}
+
+pub fn day_start(epoch: u64, offset_min: i32) -> u64 {
+    bucket_start(epoch, offset_min, 86_400)
+}
+
+pub fn hour_start(epoch: u64, offset_min: i32) -> u64 {
+    bucket_start(epoch, offset_min, 3_600)
+}
+
+pub fn hour_label(epoch: u64, offset_min: i32) -> String {
+    let (_, _, _, h, _, _) = utc_parts(shifted(epoch, offset_min));
+    format!("{h:02}:00")
+}
+
+pub fn parse_iso_ts(s: &str) -> Option<u64> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' {
+        return None;
+    }
+    if bytes[13] != b':' || bytes[16] != b':' {
+        return None;
+    }
+    let y: i32 = s.get(0..4)?.parse().ok()?;
+    let m: u32 = s.get(5..7)?.parse().ok()?;
+    let d: u32 = s.get(8..10)?.parse().ok()?;
+    let h: u64 = s.get(11..13)?.parse().ok()?;
+    let min: u64 = s.get(14..16)?.parse().ok()?;
+    let sec: u64 = s.get(17..19)?.parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || h > 23 || min > 59 || sec > 59 {
+        return None;
+    }
+    let days = days_from_civil(y, m, d);
+    if days < 0 {
+        return None;
+    }
+    Some(days as u64 * 86_400 + h * 3600 + min * 60 + sec)
 }
 
 pub fn iso_ts(epoch: u64) -> String {
@@ -212,8 +253,6 @@ pub fn prune(st: &mut Limits) {
         v.retain(|h| now.saturating_duration_since(h.at) < hour);
         !v.is_empty()
     });
-    st.ping_last
-        .retain(|_, at| now.saturating_duration_since(*at) < day);
 }
 
 pub fn ct_eq(a: &str, b: &str) -> bool {
@@ -265,7 +304,32 @@ mod tests {
         assert_eq!(day_key(epoch), "20260819");
         assert_eq!(parse_day_key("20260819"), Some(epoch));
         assert_eq!(iso_ts(epoch), "2026-08-19T00:00:00Z");
-        assert_eq!(hour_prefix(epoch + 3661), "2026-08-19T01");
+        assert_eq!(parse_iso_ts(&iso_ts(epoch + 3661)), Some(epoch + 3661));
+    }
+
+    #[test]
+    fn iso_timestamps_round_trip_and_reject_junk() {
+        for epoch in [0u64, 1_787_140_800, 1_709_208_061] {
+            assert_eq!(parse_iso_ts(&iso_ts(epoch)), Some(epoch));
+        }
+        assert_eq!(parse_iso_ts(""), None);
+        assert_eq!(parse_iso_ts("2026-08-19"), None);
+        assert_eq!(parse_iso_ts("2026/08/19T00:00:00Z"), None);
+        assert_eq!(parse_iso_ts("2026-13-19T00:00:00Z"), None);
+        assert_eq!(parse_iso_ts("2026-08-19T24:00:00Z"), None);
+    }
+
+    #[test]
+    fn buckets_follow_the_viewer_offset() {
+        let epoch = 1_787_140_800;
+        assert_eq!(day_start(epoch, 0), 1_787_097_600);
+        assert_eq!(day_start(epoch, 480), 1_787_068_800);
+        assert_eq!(day_start(epoch, -300), 1_787_115_600);
+        assert_eq!(hour_start(epoch + 61, 480), epoch);
+        assert_eq!(hour_label(epoch, 0), "12:00");
+        assert_eq!(hour_label(epoch, 480), "20:00");
+        assert_eq!(hour_label(epoch, -300), "07:00");
+        assert_eq!(hour_start(epoch, 330) % 1_800, 0);
     }
 
     #[test]

@@ -13,8 +13,7 @@ pub struct Limits {
     pub by_id: HashMap<String, Vec<Hit>>,
     pub admin_fail_ip: HashMap<String, Vec<Hit>>,
     pub ping_by_ip: HashMap<String, Vec<Hit>>,
-    pub ping_last: HashMap<String, Instant>,
-    pub last_ping_prune: Instant,
+    pub last_maintenance: Instant,
 }
 
 pub struct Config {

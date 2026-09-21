@@ -5,7 +5,8 @@ use std::time::Instant;
 use crate::assets;
 use crate::config::{Config, Hit, Limits};
 use crate::http::{Request, Response};
-use crate::stats::{compute_stats, pairs_json};
+use crate::index::Index;
+use crate::stats::{compute_stats, pairs_json, Window};
 use crate::store::{list_tickets, load_ticket, safe_ticket, ticket_time, valid_ticket_id, Stored};
 use crate::util::{
     b64, client_ip, ct_eq, esc, header_value, html, json_ok, now_epoch, over_limit, prune, text,
@@ -14,27 +15,40 @@ use crate::util::{
 
 const DELETE_MAX_BODY: usize = 4096;
 
-pub fn handle_get(req: &Request, path: &str, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+pub fn handle_get(
+    req: &Request,
+    path: &str,
+    cfg: &Config,
+    state: &Mutex<Limits>,
+    index: &Mutex<Index>,
+) -> Resp {
     if path == "/" {
         return text(200, "ok");
     }
     let Some(rest) = path.strip_prefix(&format!("/{}", cfg.admin_path)) else {
         return text(404, "not found");
     };
-    handle_admin(req, rest, cfg, state)
+    handle_admin(req, rest, cfg, state, index)
 }
 
-fn handle_admin(req: &Request, rest: &str, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+fn handle_admin(
+    req: &Request,
+    rest: &str,
+    cfg: &Config,
+    state: &Mutex<Limits>,
+    index: &Mutex<Index>,
+) -> Resp {
     if let Some(resp) = admin_gate(req, cfg, state) {
         return resp;
     }
     let rest = rest.trim_start_matches('/');
     let prefix = format!("/deviceout-feedback/{}", cfg.admin_path);
+    let view = View::default();
     if rest.is_empty() {
-        return html(admin_index(&cfg.dir, &prefix));
+        return html(admin_index(cfg, index, &prefix, view));
     }
     if rest == "data" {
-        return json_ok(&dashboard_json(&cfg.dir));
+        return json_ok(&dashboard_json(cfg, index, view));
     }
     if !safe_ticket(rest) {
         return text(404, "not found");
@@ -170,30 +184,54 @@ fn ticket_rows(dir: &Path) -> Vec<serde_json::Value> {
         .collect()
 }
 
-fn dashboard_json(dir: &Path) -> String {
-    let stats = compute_stats(dir, now_epoch());
+#[derive(Debug, Clone, Copy)]
+pub struct View {
+    pub offset_min: i32,
+    pub window: Window,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        Self {
+            offset_min: 0,
+            window: Window::parse(None),
+        }
+    }
+}
+
+fn dashboard_json(cfg: &Config, index: &Mutex<Index>, view: View) -> String {
+    let stats = {
+        let idx = index.lock().unwrap();
+        compute_stats(&idx, &cfg.dir, now_epoch(), view.offset_min, view.window)
+    };
     serde_json::json!({
         "users": stats.total_users,
+        "active": stats.active,
         "online": stats.online,
         "today": stats.today_active,
         "tickets": stats.total_tickets,
+        "cohort": stats.cohort,
+        "window": view.window.key(),
+        "windowLabel": view.window.label(),
         "trend": {"labels": stats.trend_labels, "values": stats.trend_values},
         "versions": pairs_json(&stats.versions),
         "locales": pairs_json(&stats.locales),
         "regions": pairs_json(&stats.regions),
         "os": pairs_json(&stats.os),
-        "rows": ticket_rows(dir),
+        "rows": ticket_rows(&cfg.dir),
     })
     .to_string()
 }
 
-fn admin_index(dir: &Path, prefix: &str) -> String {
-    let data = dashboard_json(dir);
+fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> String {
+    let data = dashboard_json(cfg, index, view);
     let stats: serde_json::Value = serde_json::from_str(&data).unwrap_or_else(|_| serde_json::json!({}));
-    let users = stats.get("users").and_then(|v| v.as_u64()).unwrap_or(0);
-    let online = stats.get("online").and_then(|v| v.as_u64()).unwrap_or(0);
-    let today = stats.get("today").and_then(|v| v.as_u64()).unwrap_or(0);
-    let tickets = stats.get("tickets").and_then(|v| v.as_u64()).unwrap_or(0);
+    let num = |key: &str| stats.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+    let users = num("users");
+    let active = num("active");
+    let online = num("online");
+    let today = num("today");
+    let tickets = num("tickets");
     let data = data.replace("</", "<\\/");
 
     let mut out = String::with_capacity(48 * 1024);
@@ -210,7 +248,8 @@ fn admin_index(dir: &Path, prefix: &str) -> String {
     ));
     out.push_str("<section class=\"cards\">");
     for (id, label, cls, value) in [
-        ("n-users", "用户", "", users),
+        ("n-users", "累计用户", "", users),
+        ("n-active", "活跃 30 天", "", active),
         ("n-online", "在线", "green", online),
         ("n-today", "今日", "", today),
         ("n-tickets", "工单", "", tickets),
