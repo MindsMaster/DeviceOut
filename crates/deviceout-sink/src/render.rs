@@ -156,7 +156,11 @@ unsafe fn open_stream(
     };
 
     let (mut duration, mut periodicity) = if exclusive {
-        let period = if min_period > 0 { min_period } else { default_period };
+        let period = if min_period > 0 {
+            min_period
+        } else {
+            default_period
+        };
         (period, period)
     } else {
         (i64::from(options.buffer_ms) * 10_000, 0)
@@ -173,7 +177,11 @@ unsafe fn open_stream(
         )
     };
 
-    if exclusive && init.as_ref().is_err_and(|e| e.code() == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
+    if exclusive
+        && init
+            .as_ref()
+            .is_err_and(|e| e.code() == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED)
+    {
         let aligned = unsafe { client.GetBufferSize() }
             .map_err(|e| SinkError::init_from_hresult("读取对齐后的缓冲大小失败", e))?;
         duration = duration_of(aligned, format.sample_rate);

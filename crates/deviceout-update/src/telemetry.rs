@@ -105,7 +105,9 @@ fn unix_now() -> i64 {
 }
 
 fn valid_id(s: &str) -> bool {
-    s.len() == 32 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    s.len() == 32
+        && s.chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 #[cfg(test)]

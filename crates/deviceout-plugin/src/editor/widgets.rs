@@ -171,7 +171,10 @@ pub(crate) fn switch(ui: &mut egui::Ui, on: &mut bool) -> Response {
     );
 
     let radius = 9.0;
-    let cx = egui::lerp((rect.left() + radius + 3.0)..=(rect.right() - radius - 3.0), t);
+    let cx = egui::lerp(
+        (rect.left() + radius + 3.0)..=(rect.right() - radius - 3.0),
+        t,
+    );
     let squash = if response.is_pointer_button_down_on() {
         2.0
     } else {
@@ -402,8 +405,7 @@ pub(crate) fn number_combo(
                                 };
                                 let label = format!("{step} {}", combo.unit);
                                 let here = step == drag.unwrap_or(combo.value);
-                                if combo_option(ui, &label, hint, here).clicked()
-                                    && hint.is_none()
+                                if combo_option(ui, &label, hint, here).clicked() && hint.is_none()
                                 {
                                     picked = Some(step);
                                     ui.memory_mut(|memory| memory.close_popup());

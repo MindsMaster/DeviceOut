@@ -65,7 +65,10 @@ pub fn run(bundle: &Path, force: bool) -> Result<()> {
     match deviceout_update::cmp_latest(&feed.version, &current) {
         Cmp::Newer => {}
         Cmp::EqualOrOlder => {
-            logutil::log(&format!("check: idle latest={} current={current}", feed.version));
+            logutil::log(&format!(
+                "check: idle latest={} current={current}",
+                feed.version
+            ));
             finish_ok(&mut state, Some(&feed.version));
             return Ok(());
         }
@@ -114,7 +117,10 @@ fn current_version(bundle: &Path) -> String {
 enum Fetch {
     NotModified,
     NothingPublished,
-    Body { bytes: Vec<u8>, etag: Option<String> },
+    Body {
+        bytes: Vec<u8>,
+        etag: Option<String>,
+    },
 }
 
 fn fetch_feed(url: &str, etag: Option<&str>) -> Result<Fetch> {
@@ -159,7 +165,10 @@ fn download_pending(feed: &Feed, bundle: &Path) -> Result<()> {
     std::fs::create_dir_all(paths::pending_dir())?;
     let part = paths::pending_dir().join("setup.exe.part");
     let agent = crate::http::agent(Duration::from_secs(120));
-    let mut resp = agent.get(&feed.url).call().with_context(|| feed.url.clone())?;
+    let mut resp = agent
+        .get(&feed.url)
+        .call()
+        .with_context(|| feed.url.clone())?;
     {
         let mut file = std::fs::File::create(&part).context("create part")?;
         let mut reader = resp.body_mut().as_reader();
@@ -204,13 +213,21 @@ mod tests {
 
     #[test]
     fn a_ready_installer_lets_the_cached_feed_stand() {
-        assert!(!needs_full_fetch(&state("1.1.2"), "1.1.1", Some(&pending("1.1.2"))));
+        assert!(!needs_full_fetch(
+            &state("1.1.2"),
+            "1.1.1",
+            Some(&pending("1.1.2"))
+        ));
     }
 
     #[test]
     fn a_missing_installer_forces_a_full_fetch() {
         assert!(needs_full_fetch(&state("1.1.2"), "1.1.1", None));
-        assert!(needs_full_fetch(&state("1.1.2"), "1.1.1", Some(&pending("1.1.0"))));
+        assert!(needs_full_fetch(
+            &state("1.1.2"),
+            "1.1.1",
+            Some(&pending("1.1.0"))
+        ));
     }
 
     #[test]

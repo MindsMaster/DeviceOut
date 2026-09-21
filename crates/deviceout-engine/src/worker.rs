@@ -228,7 +228,11 @@ pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
     })
 }
 
-pub fn start_with<O: OpenSink>(consumer: RingConsumer, config: EngineConfig, open: O) -> EngineHandle {
+pub fn start_with<O: OpenSink>(
+    consumer: RingConsumer,
+    config: EngineConfig,
+    open: O,
+) -> EngineHandle {
     let metrics = Arc::new(EngineMetrics::new(Arc::clone(consumer.stats())));
     let stop = Arc::new(AtomicBool::new(false));
 

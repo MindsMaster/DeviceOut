@@ -99,9 +99,8 @@ pub(crate) fn update_at<T>(path: &Path, edit: impl FnOnce(&mut UiJson) -> T) -> 
     let mut out = None;
     with_file_lock(path, |existing| {
         let mut ui = match existing {
-            Some(bytes) => serde_json::from_slice(bytes).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-            })?,
+            Some(bytes) => serde_json::from_slice(bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
             None => UiJson::default(),
         };
         out = Some(edit(&mut ui));

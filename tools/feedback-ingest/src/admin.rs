@@ -287,7 +287,8 @@ fn dashboard_json(cfg: &Config, index: &Mutex<Index>, view: View) -> String {
 
 fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> String {
     let data = dashboard_json(cfg, index, view);
-    let stats: serde_json::Value = serde_json::from_str(&data).unwrap_or_else(|_| serde_json::json!({}));
+    let stats: serde_json::Value =
+        serde_json::from_str(&data).unwrap_or_else(|_| serde_json::json!({}));
     let num = |key: &str| stats.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
     let users = num("users");
     let active = num("active");
@@ -330,7 +331,12 @@ fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> 
          <div class=\"chart tall\"><canvas id=\"trend\"></canvas></div></section>",
     );
     out.push_str("<section class=\"grid2\">");
-    for (title, id) in [("版本", "ver"), ("系统", "os"), ("语言", "loc"), ("地区", "reg")] {
+    for (title, id) in [
+        ("版本", "ver"),
+        ("系统", "os"),
+        ("语言", "loc"),
+        ("地区", "reg"),
+    ] {
         out.push_str(&format!(
             "<div class=\"card\"><h2>{title}<span class=\"sub cohort\"></span></h2>\
              <div class=\"chart\"><canvas id=\"{id}\"></canvas></div></div>"

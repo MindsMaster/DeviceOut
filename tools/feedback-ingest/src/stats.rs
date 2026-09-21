@@ -95,7 +95,10 @@ pub fn compute_stats(
         bump(&mut versions, &device.version);
         bump(&mut os, &os_family(&device.os));
         bump(&mut locales, &device.locale);
-        bump(&mut regions, &crate::geo::country_of(&device.locale, &device.tz));
+        bump(
+            &mut regions,
+            &crate::geo::country_of(&device.locale, &device.tz),
+        );
     }
 
     let (trend_labels, trend_values) = trend(dir, now, offset_min);
@@ -240,9 +243,21 @@ mod tests {
 
     fn seeded(dir: &Path) -> Index {
         let mut index = Index::load(dir, NOW);
-        index.record(&ping("fresh", "zh-CN", "Windows 11 26100"), "1.1.1.1", NOW - 60);
-        index.record(&ping("today", "en-US", "Windows 10 19045"), "1.1.1.2", NOW - 3 * 3600);
-        index.record(&ping("week", "ru-RU", "Windows 11 22631"), "1.1.1.3", NOW - 6 * 86_400);
+        index.record(
+            &ping("fresh", "zh-CN", "Windows 11 26100"),
+            "1.1.1.1",
+            NOW - 60,
+        );
+        index.record(
+            &ping("today", "en-US", "Windows 10 19045"),
+            "1.1.1.2",
+            NOW - 3 * 3600,
+        );
+        index.record(
+            &ping("week", "ru-RU", "Windows 11 22631"),
+            "1.1.1.3",
+            NOW - 6 * 86_400,
+        );
         index.record(&ping("ghost", "", ""), "1.1.1.4", NOW - 200 * 86_400);
         index
     }
@@ -262,9 +277,18 @@ mod tests {
         let all = compute_stats(&index, &dir, NOW, 0, Window::All);
         assert_eq!(all.cohort, 4);
         assert_eq!(all.total_users, 4);
-        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::Days(30)).cohort, 3);
-        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::Days(7)).cohort, 3);
-        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::Days(1)).cohort, 2);
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, 0, Window::Days(30)).cohort,
+            3
+        );
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, 0, Window::Days(7)).cohort,
+            3
+        );
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, 0, Window::Days(1)).cohort,
+            2
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -281,8 +305,14 @@ mod tests {
         assert_eq!(online_window(&index.devices()["legacy"]), 2_700);
 
         assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::All).online, 2);
-        assert_eq!(compute_stats(&index, &dir, NOW + 1_000, 0, Window::All).online, 1);
-        assert_eq!(compute_stats(&index, &dir, NOW + 3_000, 0, Window::All).online, 0);
+        assert_eq!(
+            compute_stats(&index, &dir, NOW + 1_000, 0, Window::All).online,
+            1
+        );
+        assert_eq!(
+            compute_stats(&index, &dir, NOW + 3_000, 0, Window::All).online,
+            0
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -304,7 +334,10 @@ mod tests {
     fn the_active_window_still_counts_a_month() {
         let dir = temp("stats-active");
         let index = seeded(&dir);
-        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::Days(30)).active, 3);
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, 0, Window::Days(30)).active,
+            3
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -312,9 +345,18 @@ mod tests {
     fn today_follows_the_viewer_offset() {
         let dir = temp("stats-today");
         let index = seeded(&dir);
-        assert_eq!(compute_stats(&index, &dir, NOW, 0, Window::All).today_active, 2);
-        assert_eq!(compute_stats(&index, &dir, NOW, 480, Window::All).today_active, 2);
-        assert_eq!(compute_stats(&index, &dir, NOW, -660, Window::All).today_active, 1);
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, 0, Window::All).today_active,
+            2
+        );
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, 480, Window::All).today_active,
+            2
+        );
+        assert_eq!(
+            compute_stats(&index, &dir, NOW, -660, Window::All).today_active,
+            1
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -322,10 +364,34 @@ mod tests {
     fn the_trend_buckets_pings_by_the_viewer_hour() {
         let dir = temp("stats-trend");
         let index = Index::load(&dir, NOW);
-        store_ping(&dir, &ping("a", "zh-CN", "Windows 11"), "1.1.1.1", NOW - 600).unwrap();
-        store_ping(&dir, &ping("a", "zh-CN", "Windows 11"), "1.1.1.1", NOW - 300).unwrap();
-        store_ping(&dir, &ping("b", "zh-CN", "Windows 11"), "1.1.1.2", NOW - 5 * 3600).unwrap();
-        store_ping(&dir, &ping("c", "zh-CN", "Windows 11"), "1.1.1.3", NOW - 30 * 3600).unwrap();
+        store_ping(
+            &dir,
+            &ping("a", "zh-CN", "Windows 11"),
+            "1.1.1.1",
+            NOW - 600,
+        )
+        .unwrap();
+        store_ping(
+            &dir,
+            &ping("a", "zh-CN", "Windows 11"),
+            "1.1.1.1",
+            NOW - 300,
+        )
+        .unwrap();
+        store_ping(
+            &dir,
+            &ping("b", "zh-CN", "Windows 11"),
+            "1.1.1.2",
+            NOW - 5 * 3600,
+        )
+        .unwrap();
+        store_ping(
+            &dir,
+            &ping("c", "zh-CN", "Windows 11"),
+            "1.1.1.3",
+            NOW - 30 * 3600,
+        )
+        .unwrap();
 
         let stats = compute_stats(&index, &dir, NOW, 0, Window::All);
         assert_eq!(stats.trend_values.iter().sum::<u32>(), 2);

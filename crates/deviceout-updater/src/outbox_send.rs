@@ -32,13 +32,21 @@ pub fn send_all() -> Result<()> {
                 item.error = None;
                 let _ = outbox::move_item(&path, &paths::sent_dir(), &item);
                 outbox::cleanup_capped_dir(&paths::sent_dir(), deviceout_update::SENT_CAP);
-                logutil::log(&format!("sent {} ticket={}", item.id, item.ticket.as_deref().unwrap_or("-")));
+                logutil::log(&format!(
+                    "sent {} ticket={}",
+                    item.id,
+                    item.ticket.as_deref().unwrap_or("-")
+                ));
             }
             Err(SendErr::Permanent(msg)) => {
                 item.error = Some(msg);
                 let _ = outbox::move_item(&path, &paths::failed_dir(), &item);
                 outbox::cleanup_capped_dir(&paths::failed_dir(), deviceout_update::FAILED_CAP);
-                logutil::log(&format!("permanent fail {}: {}", item.id, item.error.as_deref().unwrap_or("-")));
+                logutil::log(&format!(
+                    "permanent fail {}: {}",
+                    item.id,
+                    item.error.as_deref().unwrap_or("-")
+                ));
             }
             Err(SendErr::Retry(msg)) => {
                 item.error = Some(msg);

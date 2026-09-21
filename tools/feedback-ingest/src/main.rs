@@ -32,7 +32,8 @@ fn main() {
     if !bind.starts_with("127.0.0.1") && !bind.starts_with("localhost") && bind != "::1" {
         eprintln!("warning: bind {bind} is not loopback; put this behind Caddy and do not expose the port");
     }
-    let dir = PathBuf::from(std::env::var("FEEDBACK_DIR").unwrap_or_else(|_| "feedback-inbox".into()));
+    let dir =
+        PathBuf::from(std::env::var("FEEDBACK_DIR").unwrap_or_else(|_| "feedback-inbox".into()));
     let _ = std::fs::create_dir_all(dir.join("stats"));
     let admin_path = load_or_create_admin_path(&dir);
     let cfg = Config {

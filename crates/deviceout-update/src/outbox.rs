@@ -103,7 +103,8 @@ pub fn new_outbox_item(
 pub fn save_item(dir: &Path, item: &OutboxItem) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.json", item.id));
-    let bytes = serde_json::to_vec_pretty(item).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let bytes =
+        serde_json::to_vec_pretty(item).map_err(|e| std::io::Error::other(e.to_string()))?;
     atomic_write(&path, &bytes)?;
     Ok(path)
 }

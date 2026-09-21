@@ -28,7 +28,10 @@ pub fn apply_pending(from_temp: bool) -> Result<()> {
         || !deviceout_update::bundle_dll(&bundle).is_file()
     {
         let _ = std::fs::remove_dir_all(paths::pending_dir());
-        bail!("pending manifest names no installed bundle: {}", manifest.bundle_path);
+        bail!(
+            "pending manifest names no installed bundle: {}",
+            manifest.bundle_path
+        );
     }
     if !wait_until_unlocked(&bundle, &manifest.version)? {
         logutil::log("apply: user cancelled while locked");
@@ -96,7 +99,10 @@ fn run_inno(manifest: &deviceout_update::PendingManifest, bundle: &Path) -> Resu
     let got = deviceout_update::file_version_string(&dll)
         .ok_or_else(|| anyhow::anyhow!("no VS_VERSIONINFO on {}", dll.display()))?;
     if got != manifest.version {
-        bail!("version mismatch: installed {got}, expected {}", manifest.version);
+        bail!(
+            "version mismatch: installed {got}, expected {}",
+            manifest.version
+        );
     }
     Ok(())
 }
@@ -106,10 +112,7 @@ fn wait_until_unlocked(bundle: &Path, version: &str) -> Result<bool> {
         if !deviceout_update::bundle_dll_locked(bundle) {
             return Ok(true);
         }
-        let retry = alert(
-            &fill(t().updater_close_host, &[("version", version)]),
-            true,
-        );
+        let retry = alert(&fill(t().updater_close_host, &[("version", version)]), true);
         if !retry {
             return Ok(false);
         }
@@ -178,7 +181,8 @@ fn alert(text: &str, retry: bool) -> bool {
             | MB_TOPMOST
             | MB_ICONINFORMATION
             | if retry { MB_RETRYCANCEL } else { MB_OK };
-        let rc = unsafe { MessageBoxW(std::ptr::null_mut(), text_w.as_ptr(), title.as_ptr(), flags) };
+        let rc =
+            unsafe { MessageBoxW(std::ptr::null_mut(), text_w.as_ptr(), title.as_ptr(), flags) };
         rc == IDRETRY || !retry
     }
     #[cfg(not(windows))]
@@ -194,7 +198,10 @@ mod tests {
 
     #[test]
     fn inno_switches_use_documented_spellings() {
-        let args = inno_args(Path::new(r"C:\x\DeviceOut.vst3"), Path::new(r"C:\x\inno.log"));
+        let args = inno_args(
+            Path::new(r"C:\x\DeviceOut.vst3"),
+            Path::new(r"C:\x\inno.log"),
+        );
         assert_eq!(
             args,
             [

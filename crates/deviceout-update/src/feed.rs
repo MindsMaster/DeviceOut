@@ -10,7 +10,10 @@ pub struct Feed {
 pub fn parse_feed(bytes: &[u8]) -> Result<Feed, String> {
     let mut feed: Feed = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     let Some(version) = crate::version::release_version(&feed.version) else {
-        return Err(format!("version must be plain major.minor.patch, got {:?}", feed.version));
+        return Err(format!(
+            "version must be plain major.minor.patch, got {:?}",
+            feed.version
+        ));
     };
     feed.version = version.to_string();
     feed.sha256 = feed.sha256.trim().to_ascii_lowercase();

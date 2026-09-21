@@ -92,8 +92,8 @@ impl DriftController {
 
         let err_norm = (self.filtered_fill - self.target_frames) / self.target_frames;
 
-        let integral_candidate = (self.integral + err_norm * dt_s)
-            .clamp(-self.integral_limit, self.integral_limit);
+        let integral_candidate =
+            (self.integral + err_norm * dt_s).clamp(-self.integral_limit, self.integral_limit);
         let raw = self.kp * err_norm + self.ki * integral_candidate;
 
         if raw.abs() < self.max_correction {
@@ -138,8 +138,7 @@ impl DriftController {
         if !ppm.is_finite() || ppm == 0.0 || self.ki == 0.0 {
             return;
         }
-        self.integral =
-            (ppm * 1.0e-6 / self.ki).clamp(-self.integral_limit, self.integral_limit);
+        self.integral = (ppm * 1.0e-6 / self.ki).clamp(-self.integral_limit, self.integral_limit);
         self.correction =
             (self.ki * self.integral).clamp(-self.max_correction, self.max_correction);
     }
@@ -313,7 +312,11 @@ mod tests {
             ..DriftTuning::default()
         };
         let ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, slack);
-        assert!(ctrl.lowpass_tau_s() <= 3.0 + 1e-12, "{}", ctrl.lowpass_tau_s());
+        assert!(
+            ctrl.lowpass_tau_s() <= 3.0 + 1e-12,
+            "{}",
+            ctrl.lowpass_tau_s()
+        );
 
         let tight = DriftTuning {
             lowpass_tau_s: 0.2,
@@ -357,7 +360,11 @@ mod tests {
     fn a_seeded_controller_starts_where_it_would_have_settled() {
         let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, DriftTuning::default());
         ctrl.seed_drift_ppm(-152.0);
-        assert!((ctrl.drift_ppm() + 152.0).abs() < 1.0e-6, "{}", ctrl.drift_ppm());
+        assert!(
+            (ctrl.drift_ppm() + 152.0).abs() < 1.0e-6,
+            "{}",
+            ctrl.drift_ppm()
+        );
         assert!((ctrl.correction_ppm() + 152.0).abs() < 1.0e-6);
 
         ctrl.seed_drift_ppm(f64::NAN);
@@ -389,7 +396,10 @@ mod tests {
 
         let cold = drop_of(0.0);
         let warm = drop_of(ppm);
-        assert!(warm < cold / 4.0, "种子没有帮助: 冷启 {cold:.0} 帧, 热启 {warm:.0} 帧");
+        assert!(
+            warm < cold / 4.0,
+            "种子没有帮助: 冷启 {cold:.0} 帧, 热启 {warm:.0} 帧"
+        );
     }
 
     #[test]

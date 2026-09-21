@@ -53,7 +53,8 @@ pub(crate) unsafe fn parse_format(wfx: *const WAVEFORMATEX) -> Result<StreamForm
     let channels = base.nChannels;
 
     let sample_format = if tag == WAVE_FORMAT_EXTENSIBLE_TAG {
-        let ext_payload = std::mem::size_of::<WAVEFORMATEXTENSIBLE>() - std::mem::size_of::<WAVEFORMATEX>();
+        let ext_payload =
+            std::mem::size_of::<WAVEFORMATEXTENSIBLE>() - std::mem::size_of::<WAVEFORMATEX>();
         let cb_size = base.cbSize;
         if usize::from(cb_size) < ext_payload {
             return Err(SinkError::UnsupportedFormat {

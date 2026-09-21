@@ -91,7 +91,10 @@ fn main() {
 }
 
 fn cleanup_temp_copies() {
-    let Ok(tmp) = std::env::temp_dir().canonicalize().or_else(|_| Ok::<_, ()>(std::env::temp_dir())) else {
+    let Ok(tmp) = std::env::temp_dir()
+        .canonicalize()
+        .or_else(|_| Ok::<_, ()>(std::env::temp_dir()))
+    else {
         return;
     };
     let Ok(entries) = std::fs::read_dir(&tmp) else {

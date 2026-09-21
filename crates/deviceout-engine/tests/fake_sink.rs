@@ -110,7 +110,11 @@ fn config() -> EngineConfig {
     }
 }
 
-fn wait_for(handle: &EngineHandle, timeout: Duration, pred: impl Fn(&EngineHandle) -> bool) -> bool {
+fn wait_for(
+    handle: &EngineHandle,
+    timeout: Duration,
+    pred: impl Fn(&EngineHandle) -> bool,
+) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if pred(handle) {
@@ -132,8 +136,14 @@ fn a_full_ring_is_trimmed_to_target_before_streaming() {
         h.metrics().state() == EngineState::Running
     }));
     let target = handle.metrics().target_frames() as u64;
-    assert_eq!(target, min_target_frames(DEFAULT_BLOCK_FRAMES, PERIOD) as u64);
-    assert_eq!(handle.metrics().frames_discarded(), CAPACITY as u64 - target);
+    assert_eq!(
+        target,
+        min_target_frames(DEFAULT_BLOCK_FRAMES, PERIOD) as u64
+    );
+    assert_eq!(
+        handle.metrics().frames_discarded(),
+        CAPACITY as u64 - target
+    );
     assert_eq!(handle.metrics().reconnects(), 0);
     assert!(handle.stop().is_some());
 }

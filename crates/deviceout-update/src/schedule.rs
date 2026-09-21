@@ -40,14 +40,22 @@ mod tests {
     #[test]
     fn a_success_holds_for_one_interval() {
         let s = state(Some(1_000), Some(1_000));
-        assert!(!should_check(&s, 1_000 + CHECK_SUCCESS_INTERVAL_SECS - 1, false));
+        assert!(!should_check(
+            &s,
+            1_000 + CHECK_SUCCESS_INTERVAL_SECS - 1,
+            false
+        ));
         assert!(should_check(&s, 1_000 + CHECK_SUCCESS_INTERVAL_SECS, false));
     }
 
     #[test]
     fn failure_holds_for_an_hour_only() {
         let s = state(None, Some(5_000));
-        assert!(!should_check(&s, 5_000 + CHECK_FAILURE_INTERVAL_SECS - 1, false));
+        assert!(!should_check(
+            &s,
+            5_000 + CHECK_FAILURE_INTERVAL_SECS - 1,
+            false
+        ));
         assert!(should_check(&s, 5_000 + CHECK_FAILURE_INTERVAL_SECS, false));
     }
 

@@ -115,8 +115,7 @@ pub fn load_or_create_admin_path(dir: &Path) -> String {
 
 fn valid_admin_path(s: &str) -> bool {
     (16..=64).contains(&s.len())
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         && s != "admin"
 }
 

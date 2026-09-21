@@ -238,8 +238,7 @@ fn install_updater() -> Result<()> {
         .join("DeviceOut");
     fs::create_dir_all(&dest_dir)?;
     let dest = dest_dir.join("deviceout-updater.exe");
-    fs::copy(&src, &dest)
-        .with_context(|| format!("复制 updater -> {}", dest.display()))?;
+    fs::copy(&src, &dest).with_context(|| format!("复制 updater -> {}", dest.display()))?;
     println!("  updater {}", dest.display());
     Ok(())
 }

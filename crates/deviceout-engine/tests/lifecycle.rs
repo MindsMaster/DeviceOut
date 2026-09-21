@@ -63,6 +63,10 @@ fn a_channel_count_mismatch_is_caught_before_touching_the_device() {
     assert_eq!(handle.metrics().state(), EngineState::Failed);
     let reason = handle.metrics().last_error().expect("失败但未记录原因");
     assert_eq!(reason.kind, deviceout_engine::FaultKind::Config);
-    assert!(reason.detail.contains("声道"), "错误信息没提声道数: {}", reason.detail);
+    assert!(
+        reason.detail.contains("声道"),
+        "错误信息没提声道数: {}",
+        reason.detail
+    );
     assert!(handle.stop().is_some());
 }

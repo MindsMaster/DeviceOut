@@ -109,12 +109,12 @@ mod tests {
             samples: 3,
             channels: 2
         }
-            .is_recoverable());
+        .is_recoverable());
         assert!(!SinkError::UnsupportedFormat {
             requested: "a".into(),
             supported: "b".into()
         }
-            .is_recoverable());
+        .is_recoverable());
     }
 
     #[cfg(windows)]

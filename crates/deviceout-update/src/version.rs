@@ -113,7 +113,8 @@ fn loaded_module_path() -> Option<PathBuf> {
     };
 
     let mut handle = std::ptr::null_mut();
-    let flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    let flags =
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
     let addr = loaded_module_path as *const u16;
     let ok = unsafe { GetModuleHandleExW(flags, addr, &mut handle) };
     if ok == 0 || handle.is_null() {
@@ -124,7 +125,9 @@ fn loaded_module_path() -> Option<PathBuf> {
     if n == 0 {
         return None;
     }
-    Some(PathBuf::from(std::ffi::OsString::from_wide(&buf[..n as usize])))
+    Some(PathBuf::from(std::ffi::OsString::from_wide(
+        &buf[..n as usize],
+    )))
 }
 
 #[cfg(not(windows))]
@@ -171,7 +174,14 @@ fn file_version_parts(path: &Path) -> Option<(u16, u16, u16, u16)> {
     let mut ptr: *mut core::ffi::c_void = std::ptr::null_mut();
     let mut len = 0u32;
     let query: Vec<u16> = "\\\0".encode_utf16().collect();
-    let ok = unsafe { VerQueryValueW(data.as_ptr() as *const _, query.as_ptr(), &mut ptr, &mut len) };
+    let ok = unsafe {
+        VerQueryValueW(
+            data.as_ptr() as *const _,
+            query.as_ptr(),
+            &mut ptr,
+            &mut len,
+        )
+    };
     if ok == 0 || ptr.is_null() || (len as usize) < std::mem::size_of::<VsFixedFileInfo>() {
         return None;
     }
@@ -223,13 +233,12 @@ mod tests {
             ))
         );
         assert_eq!(
-            bundle_from_dll(Path::new(r"C:\Users\me\AppData\Local\DeviceOut\deviceout-updater.exe")),
+            bundle_from_dll(Path::new(
+                r"C:\Users\me\AppData\Local\DeviceOut\deviceout-updater.exe"
+            )),
             None
         );
-        assert_eq!(
-            bundle_from_dll(Path::new(r"C:\a\b\c\DeviceOut.vst3")),
-            None
-        );
+        assert_eq!(bundle_from_dll(Path::new(r"C:\a\b\c\DeviceOut.vst3")), None);
         assert_eq!(
             bundle_from_dll(Path::new(r"C:\x.vst3\Contents\x86_64-win\Other.vst3")),
             None
@@ -239,7 +248,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn bundle_paths_must_be_absolute_vst3_dirs() {
-        assert!(valid_bundle_path(Path::new(r"C:\Program Files\Common Files\VST3\DeviceOut.vst3")));
+        assert!(valid_bundle_path(Path::new(
+            r"C:\Program Files\Common Files\VST3\DeviceOut.vst3"
+        )));
         assert!(!valid_bundle_path(Path::new(r"C:\Users\me\AppData")));
         assert!(!valid_bundle_path(Path::new("")));
         assert!(!valid_bundle_path(Path::new(r"DeviceOut.vst3")));

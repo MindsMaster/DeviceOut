@@ -1,12 +1,9 @@
 use deviceout_i18n::Script;
 use nih_plug_egui::egui::{FontData, FontFamily};
 
-pub(crate) const NOTO_SANS: &[u8] =
-    include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-pub(crate) const NOTO_THAI: &[u8] =
-    include_bytes!("../../assets/fonts/NotoSansThai-Regular.ttf");
-pub(crate) const NOTO_CJK: &[u8] =
-    include_bytes!("../../assets/fonts/NotoSansCJK-Regular.ttc");
+pub(crate) const NOTO_SANS: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+pub(crate) const NOTO_THAI: &[u8] = include_bytes!("../../assets/fonts/NotoSansThai-Regular.ttf");
+pub(crate) const NOTO_CJK: &[u8] = include_bytes!("../../assets/fonts/NotoSansCJK-Regular.ttc");
 
 pub(crate) const NAME_SANS: &str = "noto-sans";
 pub(crate) const NAME_THAI: &str = "noto-thai";

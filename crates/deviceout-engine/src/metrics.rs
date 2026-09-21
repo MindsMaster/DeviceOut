@@ -294,8 +294,7 @@ impl EngineMetrics {
     }
 
     pub fn is_settled(&self) -> bool {
-        self.state() == EngineState::Running
-            && self.settled.load(Ordering::Relaxed)
+        self.state() == EngineState::Running && self.settled.load(Ordering::Relaxed)
     }
 
     pub fn drift_ppm_settled(&self) -> Option<f64> {

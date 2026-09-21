@@ -80,14 +80,7 @@ pub fn package(args: &[String]) -> Result<()> {
 
         println!("  构建 {UPDATER}（release）…");
         let status = Command::new("cargo")
-            .args([
-                "build",
-                "-p",
-                UPDATER,
-                "--release",
-                "--bin",
-                UPDATER,
-            ])
+            .args(["build", "-p", UPDATER, "--release", "--bin", UPDATER])
             .status()
             .context("启动 cargo build updater")?;
         if !status.success() {
@@ -154,9 +147,7 @@ fn write_feed(setup: &Path, version: &str) -> Result<(PathBuf, PathBuf)> {
         .file_name()
         .and_then(|n| n.to_str())
         .context("setup filename")?;
-    let url = format!(
-        "https://repo.azuramc.cc/repository/raw-public/deviceout/{file_name}"
-    );
+    let url = format!("https://repo.azuramc.cc/repository/raw-public/deviceout/{file_name}");
     let feed = deviceout_update::Feed {
         version: version.to_string(),
         sha256: sha,

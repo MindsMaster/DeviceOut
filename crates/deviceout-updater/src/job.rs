@@ -58,9 +58,8 @@ pub fn run_tree(exe: &Path, args: &[String], timeout_ms: u32) -> Result<Outcome>
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows_sys::Win32::System::Threading::{
-        CreateProcessW, GetExitCodeProcess, ResumeThread, WaitForSingleObject,
-        CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION,
-        STARTUPINFOW,
+        CreateProcessW, GetExitCodeProcess, ResumeThread, WaitForSingleObject, CREATE_NO_WINDOW,
+        CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTUPINFOW,
     };
 
     struct Handle(HANDLE);
@@ -87,7 +86,9 @@ pub fn run_tree(exe: &Path, args: &[String], timeout_ms: u32) -> Result<Outcome>
         )
     };
     if ok == 0 {
-        bail!("SetInformationJobObject failed: {}", unsafe { GetLastError() });
+        bail!("SetInformationJobObject failed: {}", unsafe {
+            GetLastError()
+        });
     }
 
     let mut cmd: Vec<u16> = OsStr::new(&command_line(exe, args))
@@ -210,7 +211,10 @@ mod tests {
             .output()
             .unwrap();
         let listing = String::from_utf8_lossy(&pings.stdout);
-        assert!(!listing.to_ascii_lowercase().contains("ping.exe"), "{listing}");
+        assert!(
+            !listing.to_ascii_lowercase().contains("ping.exe"),
+            "{listing}"
+        );
     }
 
     #[cfg(windows)]

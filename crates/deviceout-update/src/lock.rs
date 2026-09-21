@@ -2,7 +2,10 @@ use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-pub fn with_file_lock(path: &Path, write: impl FnOnce(Option<&[u8]>) -> std::io::Result<Vec<u8>>) -> std::io::Result<()> {
+pub fn with_file_lock(
+    path: &Path,
+    write: impl FnOnce(Option<&[u8]>) -> std::io::Result<Vec<u8>>,
+) -> std::io::Result<()> {
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -12,7 +15,11 @@ pub fn with_file_lock(path: &Path, write: impl FnOnce(Option<&[u8]>) -> std::io:
     lock_exclusive(&file)?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
-    let existing = if buf.is_empty() { None } else { Some(buf.as_slice()) };
+    let existing = if buf.is_empty() {
+        None
+    } else {
+        Some(buf.as_slice())
+    };
     let out = write(existing)?;
     file.seek(SeekFrom::Start(0))?;
     file.set_len(0)?;

@@ -84,7 +84,7 @@ impl DriftResampler {
             channels,
             FixedAsync::Output,
         )
-            .map_err(|_| ResampleError::Backend)?;
+        .map_err(|_| ResampleError::Backend)?;
 
         Ok(Self {
             inner,
@@ -340,9 +340,8 @@ mod tests {
 
     fn solve3(mut m: [[f64; 3]; 3], mut rhs: [f64; 3]) -> Option<[f64; 3]> {
         for col in 0..3 {
-            let pivot = (col..3).max_by(|&i, &j| {
-                m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap()
-            })?;
+            let pivot =
+                (col..3).max_by(|&i, &j| m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap())?;
             if m[pivot][col].abs() < 1.0e-12 {
                 return None;
             }
@@ -435,7 +434,9 @@ mod tests {
             phase += need;
             r.process(&input[..need * CHANNELS], &mut output).unwrap();
             if block >= WARMUP {
-                in_energy += (0..need).map(|f| f64::from(input[f * CHANNELS]).powi(2)).sum::<f64>()
+                in_energy += (0..need)
+                    .map(|f| f64::from(input[f * CHANNELS]).powi(2))
+                    .sum::<f64>()
                     / need as f64;
                 out_energy += (0..r.output_frames())
                     .map(|f| f64::from(output[f * CHANNELS]).powi(2))

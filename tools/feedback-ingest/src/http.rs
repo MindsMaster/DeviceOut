@@ -48,7 +48,11 @@ impl Response {
     }
 
     pub fn text(status: u16, body: &str) -> Self {
-        Self::bytes(status, body.as_bytes().to_vec(), "text/plain; charset=utf-8")
+        Self::bytes(
+            status,
+            body.as_bytes().to_vec(),
+            "text/plain; charset=utf-8",
+        )
     }
 
     pub fn bytes(status: u16, body: Vec<u8>, content_type: &str) -> Self {
@@ -91,7 +95,12 @@ impl Default for Limits {
 
 pub type Handler = Arc<dyn Fn(Request) -> Response + Send + Sync>;
 
-pub fn serve(listener: TcpListener, workers: usize, limits: Limits, handler: Handler) -> io::Result<()> {
+pub fn serve(
+    listener: TcpListener,
+    workers: usize,
+    limits: Limits,
+    handler: Handler,
+) -> io::Result<()> {
     let (tx, rx) = mpsc::sync_channel::<TcpStream>(workers.max(1) * 4);
     let rx = Arc::new(Mutex::new(rx));
     for _ in 0..workers.max(1) {
@@ -161,7 +170,8 @@ fn read_request(stream: &mut TcpStream, limits: Limits) -> Result<Request, ReadE
     };
 
     let head = std::str::from_utf8(&buf[..head_end]).map_err(|_| ReadError::Reject(400))?;
-    let (method, target, headers) = parse_head(head, limits.header_count).map_err(ReadError::Reject)?;
+    let (method, target, headers) =
+        parse_head(head, limits.header_count).map_err(ReadError::Reject)?;
 
     if headers
         .iter()
@@ -174,7 +184,10 @@ fn read_request(stream: &mut TcpStream, limits: Limits) -> Result<Request, ReadE
         .find(|(k, _)| k.eq_ignore_ascii_case("Content-Length"))
     {
         None => 0,
-        Some((_, v)) => v.trim().parse::<usize>().map_err(|_| ReadError::Reject(400))?,
+        Some((_, v)) => v
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| ReadError::Reject(400))?,
     };
     if content_length > limits.body_bytes {
         return Err(ReadError::Reject(413));
@@ -329,7 +342,10 @@ mod tests {
         let c = Arc::clone(&calls);
         let handler: Handler = Arc::new(move |req: Request| {
             c.fetch_add(1, Ordering::SeqCst);
-            Response::text(200, &format!("{} {} {}", req.method_name(), req.target, req.body.len()))
+            Response::text(
+                200,
+                &format!("{} {} {}", req.method_name(), req.target, req.body.len()),
+            )
         });
         (handler, calls)
     }
@@ -420,7 +436,8 @@ mod tests {
         let addr = start(limits, handler);
         let mut s = TcpStream::connect(addr).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        s.write_all(b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc").unwrap();
+        s.write_all(b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc")
+            .unwrap();
         let started = Instant::now();
         let mut out = Vec::new();
         let _ = s.read_to_end(&mut out);
@@ -438,7 +455,13 @@ mod tests {
         .unwrap();
         assert_eq!(m, Method::Post);
         assert_eq!(t, "/deviceout-feedback/ping");
-        assert_eq!(h, vec![("Host".into(), "x".into()), ("X-DeviceOut-Token".into(), "abc".into())]);
+        assert_eq!(
+            h,
+            vec![
+                ("Host".into(), "x".into()),
+                ("X-DeviceOut-Token".into(), "abc".into())
+            ]
+        );
     }
 
     #[test]
@@ -446,9 +469,18 @@ mod tests {
         assert_eq!(parse_head("GET\r\n", 64).unwrap_err(), 400);
         assert_eq!(parse_head("GET / HTTP/2\r\n", 64).unwrap_err(), 400);
         assert_eq!(parse_head("GET / HTTP/1.1 extra\r\n", 64).unwrap_err(), 400);
-        assert_eq!(parse_head("GET / HTTP/1.1\r\nno-colon\r\n", 64).unwrap_err(), 400);
-        assert_eq!(parse_head("GET / HTTP/1.1\r\nBad Name: v\r\n", 64).unwrap_err(), 400);
-        assert_eq!(parse_head("GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\n", 1).unwrap_err(), 431);
+        assert_eq!(
+            parse_head("GET / HTTP/1.1\r\nno-colon\r\n", 64).unwrap_err(),
+            400
+        );
+        assert_eq!(
+            parse_head("GET / HTTP/1.1\r\nBad Name: v\r\n", 64).unwrap_err(),
+            400
+        );
+        assert_eq!(
+            parse_head("GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\n", 1).unwrap_err(),
+            431
+        );
     }
 
     #[test]

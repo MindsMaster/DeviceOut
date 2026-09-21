@@ -67,8 +67,5 @@ pub fn feedback_id_path() -> PathBuf {
 }
 
 pub fn bundle_dll(bundle: &Path) -> PathBuf {
-    bundle
-        .join("Contents")
-        .join("x86_64-win")
-        .join(BUNDLE_NAME)
+    bundle.join("Contents").join("x86_64-win").join(BUNDLE_NAME)
 }

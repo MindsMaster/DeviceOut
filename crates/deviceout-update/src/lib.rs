@@ -19,10 +19,10 @@ pub use outbox::{
     save_item, FeedbackKind, OutboxItem, FAILED_CAP, MAX_ATTEMPTS, OUTBOX_CAP, SENT_CAP,
 };
 pub use paths::{
-    appdata_dir, bundle_dll, failed_dir, feedback_id_path, feedback_log_path,
-    outbox_dir, panic_log_path, pending_dir, pending_manifest_path, pending_setup_path,
-    sent_dir, state_path, ui_json_path, update_log_path, updater_exe, BUILTIN_FEED_URL,
-    BUILTIN_FEEDBACK_URL, BUILTIN_FEEDBACK_TOKEN, BUNDLE_NAME, SETUP_PREFIX,
+    appdata_dir, bundle_dll, failed_dir, feedback_id_path, feedback_log_path, outbox_dir,
+    panic_log_path, pending_dir, pending_manifest_path, pending_setup_path, sent_dir, state_path,
+    ui_json_path, update_log_path, updater_exe, BUILTIN_FEEDBACK_TOKEN, BUILTIN_FEEDBACK_URL,
+    BUILTIN_FEED_URL, BUNDLE_NAME, SETUP_PREFIX,
 };
 pub use pending::{pending_ready, read_manifest, write_manifest, PendingManifest};
 pub use sign::{sign, verify, PUBLIC_KEYS};
@@ -132,7 +132,8 @@ mod tests {
 
     #[test]
     fn atomic_write_replaces_while_a_reader_holds_the_file_open() {
-        let dir = std::env::temp_dir().join(format!("deviceout-atomic-open-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("deviceout-atomic-open-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state.json");
