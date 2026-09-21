@@ -99,7 +99,7 @@ fn creds() -> Result<(String, String)> {
     }
     let gradle_home = std::env::var_os("GRADLE_USER_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| dirs_home())
+        .or_else(dirs_home)
         .map(|h| h.join("gradle.properties"));
     if let Some(path) = gradle_home {
         if let Ok(text) = fs::read_to_string(&path) {
