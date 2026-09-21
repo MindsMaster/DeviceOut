@@ -26,7 +26,7 @@ pub(crate) fn nearest_target_ms(ms: u32) -> u32 {
 
 pub(crate) fn min_target_ms(max_block_frames: u32, source_rate_hz: f64) -> u32 {
     let period = frames_for_ms(ASSUMED_PERIOD_MS, source_rate_hz);
-    let frames = min_target_frames(max_block_frames as usize, period) - period;
+    let frames = min_target_frames(max_block_frames as usize, period);
     ms_ceil(frames, source_rate_hz)
 }
 
@@ -274,21 +274,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_floor_covers_one_block_plus_a_device_period() {
-        assert_eq!(min_target_ms(512, 48_000.0), 21);
-        assert_eq!(min_target_ms(2048, 48_000.0), 53);
-        assert_eq!(min_target_ms(128, 44_100.0), 13);
-        assert_eq!(min_target_ms(65_536, 48_000.0), 1_376);
+    fn the_floor_matches_what_the_engine_will_actually_clamp_to() {
+        assert_eq!(min_target_ms(512, 48_000.0), 31);
+        assert_eq!(min_target_ms(2048, 48_000.0), 63);
+        assert_eq!(min_target_ms(128, 44_100.0), 23);
+        assert_eq!(min_target_ms(65_536, 48_000.0), 1_386);
     }
 
     #[test]
     fn user_choice_snaps_to_a_step_but_never_below_the_floor() {
-        assert_eq!(clamp_target_ms(10, 21), 30);
-        assert_eq!(clamp_target_ms(10, 53), 80);
-        assert_eq!(clamp_target_ms(30, 13), 30);
-        assert_eq!(clamp_target_ms(0, 13), 20);
-        assert_eq!(clamp_target_ms(u32::MAX, 13), 120);
-        assert_eq!(clamp_target_ms(10, 1_376), 120);
+        assert_eq!(clamp_target_ms(10, 31), 50);
+        assert_eq!(clamp_target_ms(10, 63), 80);
+        assert_eq!(clamp_target_ms(30, 23), 30);
+        assert_eq!(clamp_target_ms(0, 23), 30);
+        assert_eq!(clamp_target_ms(u32::MAX, 23), 120);
+        assert_eq!(clamp_target_ms(10, 1_386), 120);
     }
 
     #[test]
