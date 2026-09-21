@@ -17,8 +17,9 @@ use crate::{AudioSink, WriteReport};
 
 const WAIT_TIMEOUT_MS: u32 = 2000;
 
-pub const MIN_QUEUE_PERIODS: u32 = 2;
+pub const MIN_QUEUE_PERIODS: u32 = 1;
 pub const MAX_QUEUE_PERIODS: u32 = 4;
+pub const DEFAULT_QUEUE_PERIODS: u32 = 2;
 
 const HNS_PER_SECOND: f64 = 1.0e7;
 
@@ -33,7 +34,7 @@ impl Default for SinkOptions {
     fn default() -> Self {
         Self {
             buffer_ms: 40,
-            queue_periods: MIN_QUEUE_PERIODS,
+            queue_periods: DEFAULT_QUEUE_PERIODS,
             exclusive: false,
         }
     }
@@ -434,8 +435,8 @@ mod tests {
 
     #[test]
     fn a_silly_period_count_is_pulled_back_into_range() {
-        assert_eq!(device_queue_limit(480, 4_800, 0), 960);
-        assert_eq!(device_queue_limit(480, 4_800, 1), 960);
+        assert_eq!(device_queue_limit(480, 4_800, 0), 480);
+        assert_eq!(device_queue_limit(480, 4_800, 1), 480);
         assert_eq!(device_queue_limit(480, 4_800, u32::MAX), 1_920);
     }
 

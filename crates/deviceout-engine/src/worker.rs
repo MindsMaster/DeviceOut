@@ -34,7 +34,7 @@ impl Default for EngineConfig {
             max_block_frames: DEFAULT_BLOCK_FRAMES,
             target_ms: DEFAULT_TARGET_MS,
             device_buffer_ms: 40,
-            device_queue_periods: deviceout_sink::MIN_QUEUE_PERIODS,
+            device_queue_periods: deviceout_sink::DEFAULT_QUEUE_PERIODS,
             exclusive: false,
             initial_drift_ppm: 0.0,
             prime_timeout_s: 5.0,

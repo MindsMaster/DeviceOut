@@ -12,7 +12,7 @@ use deviceout_engine::{
 pub(crate) const DEFAULT_TARGET_MS: u32 = 30;
 pub(crate) const MAX_TARGET_MS: u32 = 1_000;
 pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 50, 80, 120, 200];
-pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[2, 3, 4];
+pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[1, 2, 3, 4];
 pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 2;
 
 pub(crate) fn min_target_ms(max_block_frames: u32, source_rate_hz: f64, queue_periods: u32) -> u32 {
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn the_device_queue_stays_within_the_offered_steps() {
-        assert_eq!(clamp_queue_periods(0), 2);
+        assert_eq!(clamp_queue_periods(0), 1);
         assert_eq!(clamp_queue_periods(3), 3);
         assert_eq!(clamp_queue_periods(99), 4);
         assert_eq!(clamp_queue_periods(DEFAULT_QUEUE_PERIODS), 2);

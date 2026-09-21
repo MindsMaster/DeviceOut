@@ -14,7 +14,8 @@ pub use error::SinkError;
 pub use priority::AudioPriority;
 #[cfg(windows)]
 pub use render::{
-    device_queue_limit, SinkOptions, WasapiSink, MAX_QUEUE_PERIODS, MIN_QUEUE_PERIODS,
+    device_queue_limit, SinkOptions, WasapiSink, DEFAULT_QUEUE_PERIODS, MAX_QUEUE_PERIODS,
+    MIN_QUEUE_PERIODS,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
