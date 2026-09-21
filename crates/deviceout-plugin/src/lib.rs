@@ -12,10 +12,12 @@ use deviceout_sink::DeviceInfo;
 
 mod editor;
 mod engine_ctl;
+mod heartbeat;
 
 pub(crate) use engine_ctl::{
     min_ring_frames, EngineController, DEFAULT_RING_FRAMES, RING_FRAME_STEPS,
 };
+pub(crate) use heartbeat::Heartbeat;
 
 const EDITOR_WIDTH: u32 = 440;
 const EDITOR_HEIGHT: u32 = 560;
@@ -25,6 +27,7 @@ pub struct DeviceOut {
     engine: Arc<EngineController>,
     scratch: Vec<f32>,
     devices: Arc<RwLock<Vec<DeviceInfo>>>,
+    heartbeat: Option<Heartbeat>,
 }
 
 impl std::fmt::Debug for DeviceOut {
@@ -65,6 +68,7 @@ impl Default for DeviceOut {
             engine: Arc::new(EngineController::default()),
             scratch: Vec::new(),
             devices: Arc::new(RwLock::new(Vec::new())),
+            heartbeat: None,
         }
     }
 }
@@ -111,7 +115,9 @@ impl Plugin for DeviceOut {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         kick_updater();
-        deviceout_update::telemetry::spawn_ping(env!("CARGO_PKG_VERSION"));
+        if self.heartbeat.is_none() {
+            self.heartbeat = Some(Heartbeat::start(env!("CARGO_PKG_VERSION")));
+        }
 
         let channels = audio_io_layout
             .main_output_channels
@@ -183,6 +189,9 @@ impl Plugin for DeviceOut {
     }
 
     fn deactivate(&mut self) {
+        if let Some(mut heartbeat) = self.heartbeat.take() {
+            heartbeat.stop();
+        }
         self.engine.deactivate();
     }
 }

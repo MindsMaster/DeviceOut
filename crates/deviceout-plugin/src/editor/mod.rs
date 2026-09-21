@@ -67,7 +67,6 @@ struct EditorUi {
     check_mark_attempt: Option<i64>,
     prompt_wait: Option<PromptWait>,
     telemetry_opt_in: bool,
-    last_ping: Option<Instant>,
     ring_drag: Option<u32>,
     send_watch: Option<(String, Instant)>,
     send_note: Option<(Instant, String, egui::Color32)>,
@@ -82,7 +81,6 @@ impl Default for EditorUi {
             check_mark_attempt: None,
             prompt_wait: None,
             telemetry_opt_in: deviceout_update::telemetry::is_enabled(),
-            last_ping: None,
             ring_drag: None,
             send_watch: None,
             send_note: None,
@@ -100,14 +98,6 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
         |ctx, _| theme::install(ctx),
         move |ctx, _setter, state| {
             ctx.request_repaint_after(Duration::from_millis(100));
-
-            let ping_due = state
-                .last_ping
-                .is_none_or(|t| t.elapsed() >= Duration::from_secs(15 * 60));
-            if ping_due {
-                state.last_ping = Some(Instant::now());
-                deviceout_update::telemetry::spawn_ping(env!("CARGO_PKG_VERSION"));
-            }
 
             egui::CentralPanel::default()
                 .frame(theme::root_frame())
