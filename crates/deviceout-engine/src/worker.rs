@@ -20,6 +20,7 @@ pub struct EngineConfig {
     pub device_buffer_ms: u32,
     pub device_queue_periods: u32,
     pub exclusive: bool,
+    pub initial_drift_ppm: f64,
     pub prime_timeout_s: f64,
     pub tuning: DriftTuning,
 }
@@ -35,6 +36,7 @@ impl Default for EngineConfig {
             device_buffer_ms: 40,
             device_queue_periods: deviceout_sink::MIN_QUEUE_PERIODS,
             exclusive: false,
+            initial_drift_ppm: 0.0,
             prime_timeout_s: 5.0,
             tuning: DriftTuning::default(),
         }
@@ -47,6 +49,8 @@ pub const DEFAULT_BLOCK_FRAMES: usize = 512;
 const CAPACITY_FACTOR: usize = 4;
 const MIN_CAPACITY_FRAMES: usize = 2_048;
 const PERIOD_MARGIN: usize = 2;
+const SETTLE_COLD: f64 = 3.0;
+const SETTLE_WARM: f64 = 0.5;
 
 pub fn ring_capacity_frames(source_rate_hz: f64, ring_ms: f64) -> usize {
     ((source_rate_hz * ring_ms * 1.0e-3).round() as usize).max(2)
@@ -68,6 +72,15 @@ pub fn ring_capacity_for_target(target_frames: usize) -> usize {
         .saturating_mul(CAPACITY_FACTOR)
         .max(MIN_CAPACITY_FRAMES)
         .next_power_of_two()
+}
+
+fn settle_wait(config: &EngineConfig) -> f64 {
+    let scale = if config.initial_drift_ppm == 0.0 {
+        SETTLE_COLD
+    } else {
+        SETTLE_WARM
+    };
+    config.tuning.settle_time_s * scale
 }
 
 fn target_level(config: &EngineConfig, period_frames: usize, capacity_frames: usize) -> (f64, usize) {
@@ -327,7 +340,8 @@ impl<S: AudioSink> Worker<S> {
         let (target_frames, min_target) =
             target_level(config, period_source_frames, rx.capacity_frames());
 
-        let ctrl = DriftController::new(target_frames, sink_rate, nominal_ratio, config.tuning);
+        let mut ctrl = DriftController::new(target_frames, sink_rate, nominal_ratio, config.tuning);
+        ctrl.seed_drift_ppm(config.initial_drift_ppm);
         let resampler =
             DriftResampler::new(channels, period_frames, nominal_ratio, &config.tuning)?;
 
@@ -343,7 +357,7 @@ impl<S: AudioSink> Worker<S> {
             resampler.output_delay(),
             sink.exclusive(),
         );
-        metrics.set_target(target_frames, min_target, config.tuning.settle_time_s * 3.0);
+        metrics.set_target(target_frames, min_target, settle_wait(config));
 
         Ok(Self {
             sink,
@@ -506,6 +520,17 @@ mod tests {
         for target in [96usize, 480, 1_440, 2_400, 5_760] {
             assert!(ring_capacity_for_target(target) >= 2 * target);
         }
+    }
+
+    #[test]
+    fn a_remembered_drift_shortens_the_settling_wait() {
+        let cold = cfg(30.0, 512);
+        let warm = EngineConfig {
+            initial_drift_ppm: -152.0,
+            ..cfg(30.0, 512)
+        };
+        assert_eq!(settle_wait(&cold), cold.tuning.settle_time_s * 3.0);
+        assert!(settle_wait(&warm) < settle_wait(&cold) / 4.0);
     }
 
     #[test]

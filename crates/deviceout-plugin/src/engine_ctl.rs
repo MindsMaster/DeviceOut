@@ -51,6 +51,7 @@ struct Slot {
     consumer: Option<RingConsumer>,
     handle: Option<EngineHandle>,
     config: Option<EngineConfig>,
+    running_device: String,
 }
 
 #[derive(Debug, Default)]
@@ -112,6 +113,7 @@ impl EngineController {
             consumer: Some(rx),
             handle: None,
             config: Some(config),
+            running_device: String::new(),
         };
         self.restart(&mut producer, &mut slot);
         ms
@@ -120,9 +122,21 @@ impl EngineController {
     pub(crate) fn deactivate(&self) {
         let mut slot = self.slot.lock();
         if let Some(mut handle) = slot.handle.take() {
+            self.remember_drift(&slot.running_device);
             slot.consumer = handle.stop();
         }
+        slot.running_device.clear();
         *self.metrics.write() = None;
+    }
+
+    fn remember_drift(&self, device_id: &str) {
+        let Some(metrics) = self.metrics() else {
+            return;
+        };
+        let Some(ppm) = metrics.drift_ppm_settled() else {
+            return;
+        };
+        deviceout_update::remember_drift(device_id, ppm, now_unix());
     }
 
     pub(crate) fn set_device_async(self: &Arc<Self>, device_id: String) {
@@ -210,14 +224,17 @@ impl EngineController {
 
     fn restart(&self, producer: &mut Option<RingProducer>, slot: &mut Slot) {
         if let Some(mut handle) = slot.handle.take() {
+            self.remember_drift(&slot.running_device);
             if let Some(consumer) = handle.stop() {
                 slot.consumer = Some(consumer);
             }
         }
-        let Some(config) = slot.config.clone() else {
+        slot.running_device.clear();
+        let Some(mut config) = slot.config.clone() else {
             *self.metrics.write() = None;
             return;
         };
+        config.initial_drift_ppm = deviceout_update::recall_drift(&config.device_id);
         let consumer = match slot.consumer.take() {
             Some(c) => c,
             None => {
@@ -226,10 +243,18 @@ impl EngineController {
                 rx
             }
         };
+        slot.running_device = config.device_id.clone();
         let handle = start(consumer, config);
         *self.metrics.write() = Some(Arc::clone(handle.metrics()));
         slot.handle = Some(handle);
     }
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 pub(crate) fn clamp_queue_periods(periods: u32) -> u32 {

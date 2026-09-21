@@ -121,6 +121,15 @@ impl DriftController {
         self.lowpass_tau_s
     }
 
+    pub fn seed_drift_ppm(&mut self, ppm: f64) {
+        if !ppm.is_finite() || ppm == 0.0 || self.ki == 0.0 {
+            return;
+        }
+        self.integral = ppm * 1.0e-6 / self.ki;
+        self.correction =
+            (self.ki * self.integral).clamp(-self.max_correction, self.max_correction);
+    }
+
     pub fn reset(&mut self) {
         self.filtered_fill = self.target_frames;
         self.integral = 0.0;
@@ -306,6 +315,45 @@ mod tests {
             "小水位的偏移被放大了: {wide_swing:.0} -> {tight_swing:.0}"
         );
         assert!(tight_swing < 200.0, "偏移超出预期: {tight_swing:.0}");
+    }
+
+    #[test]
+    fn a_seeded_controller_starts_where_it_would_have_settled() {
+        let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, DriftTuning::default());
+        ctrl.seed_drift_ppm(-152.0);
+        assert!((ctrl.drift_ppm() + 152.0).abs() < 1.0e-6, "{}", ctrl.drift_ppm());
+        assert!((ctrl.correction_ppm() + 152.0).abs() < 1.0e-6);
+
+        ctrl.seed_drift_ppm(f64::NAN);
+        assert!((ctrl.drift_ppm() + 152.0).abs() < 1.0e-6);
+
+        let mut wild = DriftController::new(TARGET, SINK_RATE, 1.0, DriftTuning::default());
+        wild.seed_drift_ppm(1.0e9);
+        assert!((1.0 - wild.ratio()).abs() <= DriftTuning::default().max_correction + 1e-12);
+    }
+
+    #[test]
+    fn a_seeded_controller_holds_the_level_from_the_first_second() {
+        let ppm = 400.0;
+        let source_rate = SINK_RATE * (1.0 + ppm * 1.0e-6);
+        let dt = BLOCK / SINK_RATE;
+
+        let drop_of = |seed: f64| {
+            let mut ctrl = DriftController::new(1_440.0, SINK_RATE, 1.0, DriftTuning::default());
+            ctrl.seed_drift_ppm(seed);
+            let mut fill = 1_440.0;
+            let mut worst: f64 = 0.0;
+            for _ in 0..(30.0 / dt) as usize {
+                fill += source_rate * dt - BLOCK / ctrl.ratio();
+                ctrl.update(fill, dt);
+                worst = worst.max((fill - 1_440.0).abs());
+            }
+            worst
+        };
+
+        let cold = drop_of(0.0);
+        let warm = drop_of(ppm);
+        assert!(warm < cold / 4.0, "种子没有帮助: 冷启 {cold:.0} 帧, 热启 {warm:.0} 帧");
     }
 
     #[test]

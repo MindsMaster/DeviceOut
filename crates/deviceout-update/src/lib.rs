@@ -28,7 +28,9 @@ pub use pending::{pending_ready, read_manifest, write_manifest, PendingManifest}
 pub use sign::{sign, verify, PUBLIC_KEYS};
 pub use spawn::spawn_updater;
 pub use state::{load_state, save_state, State};
-pub use ui_json::{load_ui_json, update_ui_json, UiJson};
+pub use ui_json::{
+    load_ui_json, recall_drift, remember_drift, update_ui_json, DriftMemory, UiJson,
+};
 pub use version::{
     bundle_dll_locked, bundle_writable, cmp_latest, file_version_string, loaded_bundle_path,
     release_version, scope_label, valid_bundle_path, Cmp,
