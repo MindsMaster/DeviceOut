@@ -304,6 +304,170 @@ mod tests {
         }
     }
 
+    fn fit_snr_db(samples: &[f32], out_freq: f64) -> f64 {
+        let n = samples.len() as f64;
+        let (mut ss, mut cc, mut sc, mut s1, mut c1) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        let (mut vs, mut vc, mut v1) = (0.0f64, 0.0f64, 0.0f64);
+        for (k, &v) in samples.iter().enumerate() {
+            let w = k as f64 * out_freq * TAU;
+            let (sin, cos) = (w.sin(), w.cos());
+            let v = v as f64;
+            ss += sin * sin;
+            cc += cos * cos;
+            sc += sin * cos;
+            s1 += sin;
+            c1 += cos;
+            vs += v * sin;
+            vc += v * cos;
+            v1 += v;
+        }
+
+        let m = [[ss, sc, s1], [sc, cc, c1], [s1, c1, n]];
+        let rhs = [vs, vc, v1];
+        let Some([a, b, d]) = solve3(m, rhs) else {
+            return f64::NEG_INFINITY;
+        };
+
+        let (mut signal, mut residual) = (0.0f64, 0.0f64);
+        for (k, &v) in samples.iter().enumerate() {
+            let w = k as f64 * out_freq * TAU;
+            let fit = a * w.sin() + b * w.cos() + d;
+            signal += fit * fit;
+            residual += (v as f64 - fit) * (v as f64 - fit);
+        }
+        10.0 * (signal / residual.max(f64::MIN_POSITIVE)).log10()
+    }
+
+    fn solve3(mut m: [[f64; 3]; 3], mut rhs: [f64; 3]) -> Option<[f64; 3]> {
+        for col in 0..3 {
+            let pivot = (col..3).max_by(|&i, &j| {
+                m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap()
+            })?;
+            if m[pivot][col].abs() < 1.0e-12 {
+                return None;
+            }
+            m.swap(col, pivot);
+            rhs.swap(col, pivot);
+            for row in 0..3 {
+                if row == col {
+                    continue;
+                }
+                let factor = m[row][col] / m[col][col];
+                for k in col..3 {
+                    m[row][k] -= factor * m[col][k];
+                }
+                rhs[row] -= factor * rhs[col];
+            }
+        }
+        Some([rhs[0] / m[0][0], rhs[1] / m[1][1], rhs[2] / m[2][2]])
+    }
+
+    fn best_snr_db(samples: &[f32], base: f64) -> f64 {
+        let mut centre = base;
+        let mut span = 5.0e-3;
+        let mut best = f64::NEG_INFINITY;
+        for _ in 0..3 {
+            let step = span / 100.0;
+            let mut local_best = centre;
+            best = f64::NEG_INFINITY;
+            for i in -100..=100 {
+                let freq = centre * (1.0 + step * f64::from(i));
+                let snr = fit_snr_db(samples, freq);
+                if snr > best {
+                    best = snr;
+                    local_best = freq;
+                }
+            }
+            centre = local_best;
+            span /= 50.0;
+        }
+        best
+    }
+
+    fn tone_snr_db(ratio: f64) -> f64 {
+        const CYCLE: usize = 50;
+        const WARMUP: usize = 8;
+        let freq = 1.0 / CYCLE as f64;
+
+        let mut r = resampler();
+        r.set_ratio(ratio);
+        let mut input = vec![0.0f32; r.input_frames_max() * CHANNELS];
+        let mut output = vec![0.0f32; r.output_frames() * CHANNELS];
+        let mut collected: Vec<f32> = Vec::new();
+        let mut phase = 0usize;
+
+        for block in 0..24 {
+            let need = r.input_frames_next();
+            for frame in 0..need {
+                let v = ((phase + frame) as f64 * freq * TAU).sin() as f32;
+                for ch in 0..CHANNELS {
+                    input[frame * CHANNELS + ch] = v;
+                }
+            }
+            phase += need;
+            r.process(&input[..need * CHANNELS], &mut output).unwrap();
+            if block >= WARMUP {
+                collected.extend((0..r.output_frames()).map(|f| output[f * CHANNELS]));
+            }
+        }
+
+        best_snr_db(&collected, freq / ratio)
+    }
+
+    fn alias_leak_db(ratio: f64, in_freq: f64) -> f64 {
+        const WARMUP: usize = 8;
+        let mut r = resampler();
+        r.set_ratio(ratio);
+        let mut input = vec![0.0f32; r.input_frames_max() * CHANNELS];
+        let mut output = vec![0.0f32; r.output_frames() * CHANNELS];
+        let mut phase = 0usize;
+        let (mut in_energy, mut out_energy) = (0.0f64, 0.0f64);
+
+        for block in 0..24 {
+            let need = r.input_frames_next();
+            for frame in 0..need {
+                let v = ((phase + frame) as f64 * in_freq * TAU).sin() as f32;
+                for ch in 0..CHANNELS {
+                    input[frame * CHANNELS + ch] = v;
+                }
+            }
+            phase += need;
+            r.process(&input[..need * CHANNELS], &mut output).unwrap();
+            if block >= WARMUP {
+                in_energy += (0..need).map(|f| f64::from(input[f * CHANNELS]).powi(2)).sum::<f64>()
+                    / need as f64;
+                out_energy += (0..r.output_frames())
+                    .map(|f| f64::from(output[f * CHANNELS]).powi(2))
+                    .sum::<f64>()
+                    / r.output_frames() as f64;
+            }
+        }
+        10.0 * (out_energy / in_energy.max(f64::MIN_POSITIVE)).log10()
+    }
+
+    #[test]
+    fn the_kernel_keeps_the_top_octave_and_still_rejects_aliases() {
+        for freq in [0.30, 0.40, 0.45] {
+            let keep = alias_leak_db(0.98, freq);
+            assert!(
+                keep > -1.0,
+                "通带 {freq} 衰减了 {keep:.1} dB，缩短 SINC_LEN 会削掉最高的一个八度"
+            );
+        }
+        for freq in [0.497, 0.499] {
+            let leak = alias_leak_db(0.98, freq);
+            assert!(leak < -90.0, "阻带 {freq} 只压到 {leak:.1} dB");
+        }
+    }
+
+    #[test]
+    fn the_drift_kernel_stays_far_below_the_audible_floor() {
+        for ratio in [1.0 - 0.02, 1.0 - 0.002, 1.0 + 0.002, 1.0 + 0.02] {
+            let snr = tone_snr_db(ratio);
+            assert!(snr > 120.0, "比例 {ratio} 下信噪比只有 {snr:.1} dB");
+        }
+    }
+
     #[test]
     fn unity_ratio_preserves_amplitude_and_waveform() {
         const CYCLE: usize = 50;
