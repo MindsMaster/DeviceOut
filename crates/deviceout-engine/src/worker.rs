@@ -52,7 +52,7 @@ pub const ASSUMED_RESAMPLER_MS: f64 = 3.0;
 const CAPACITY_FACTOR: usize = 4;
 const MIN_CAPACITY_FRAMES: usize = 2_048;
 const PERIOD_MARGIN: usize = 2;
-const SETTLE_COLD: f64 = 3.0;
+const SETTLE_COLD: f64 = 2.0;
 const SETTLE_WARM: f64 = 0.5;
 
 pub fn ring_capacity_frames(source_rate_hz: f64, ring_ms: f64) -> usize {
@@ -604,8 +604,8 @@ mod tests {
             initial_drift_ppm: -152.0,
             ..cfg(30.0, 512)
         };
-        assert_eq!(settle_wait(&cold), cold.tuning.settle_time_s * 3.0);
-        assert!(settle_wait(&warm) < settle_wait(&cold) / 4.0);
+        assert_eq!(settle_wait(&cold), cold.tuning.settle_time_s * 2.0);
+        assert!(settle_wait(&warm) < settle_wait(&cold) / 3.0);
     }
 
     #[test]

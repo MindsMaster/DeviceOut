@@ -18,9 +18,18 @@ impl Default for DriftTuning {
 }
 
 const LOWPASS_BANDWIDTH_RATIO: f64 = 5.0;
+pub const MAX_DRIFT_PPM: f64 = 5_000.0;
 
 fn max_lowpass_tau_s(wn: f64) -> f64 {
     1.0 / (LOWPASS_BANDWIDTH_RATIO * wn)
+}
+
+fn integral_limit(ki: f64) -> f64 {
+    if ki > 0.0 {
+        MAX_DRIFT_PPM * 1.0e-6 / ki
+    } else {
+        0.0
+    }
 }
 
 #[derive(Debug)]
@@ -28,6 +37,7 @@ pub struct DriftController {
     target_frames: f64,
     kp: f64,
     ki: f64,
+    integral_limit: f64,
     lowpass_tau_s: f64,
     max_correction: f64,
     nominal_ratio: f64,
@@ -52,11 +62,13 @@ impl DriftController {
 
         let g = sink_rate_hz / target_frames;
         let wn = 4.0 / (tuning.damping * tuning.settle_time_s);
+        let ki = wn * wn / g;
 
         Self {
             target_frames,
-            ki: wn * wn / g,
+            ki,
             kp: 2.0 * tuning.damping * wn / g,
+            integral_limit: integral_limit(ki),
             lowpass_tau_s: max_lowpass_tau_s(wn).min(tuning.lowpass_tau_s),
             max_correction: tuning.max_correction,
             nominal_ratio,
@@ -80,7 +92,8 @@ impl DriftController {
 
         let err_norm = (self.filtered_fill - self.target_frames) / self.target_frames;
 
-        let integral_candidate = self.integral + err_norm * dt_s;
+        let integral_candidate = (self.integral + err_norm * dt_s)
+            .clamp(-self.integral_limit, self.integral_limit);
         let raw = self.kp * err_norm + self.ki * integral_candidate;
 
         if raw.abs() < self.max_correction {
@@ -125,7 +138,8 @@ impl DriftController {
         if !ppm.is_finite() || ppm == 0.0 || self.ki == 0.0 {
             return;
         }
-        self.integral = ppm * 1.0e-6 / self.ki;
+        self.integral =
+            (ppm * 1.0e-6 / self.ki).clamp(-self.integral_limit, self.integral_limit);
         self.correction =
             (self.ki * self.integral).clamp(-self.max_correction, self.max_correction);
     }
@@ -215,6 +229,28 @@ mod tests {
         let ok = simulate(100.0, 2400.0, true);
         assert_eq!(ok.overruns, 0, "控制器未能阻止溢出: {ok:?}");
         assert_eq!(ok.underruns, 0, "控制器未能阻止欠载: {ok:?}");
+    }
+
+    #[test]
+    fn the_drift_estimate_stays_inside_the_plausible_band() {
+        let r = simulate(20_000.0, 600.0, true);
+        assert!(
+            r.settled_ppm.abs() <= MAX_DRIFT_PPM + 1.0,
+            "积分绕出了可信区间: {r:?}"
+        );
+
+        let ok = simulate(1_000.0, 600.0, true);
+        assert!(
+            (ok.settled_ppm - 1_000.0).abs() < 20.0,
+            "区间之内的真实漂移仍应照常跟踪: {ok:?}"
+        );
+    }
+
+    #[test]
+    fn a_seed_beyond_the_band_is_pulled_back() {
+        let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, DriftTuning::default());
+        ctrl.seed_drift_ppm(50_000.0);
+        assert!(ctrl.drift_ppm() <= MAX_DRIFT_PPM + 1.0);
     }
 
     #[test]
