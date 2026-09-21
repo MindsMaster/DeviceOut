@@ -16,6 +16,7 @@ use crate::{
     enumerate_devices, DeviceOutParams, EngineController, UiState, QUEUE_PERIOD_STEPS,
     TARGET_MS_STEPS,
 };
+use deviceout_engine::ASSUMED_PERIOD_MS;
 
 mod fonts;
 #[cfg(test)]
@@ -30,6 +31,7 @@ type SharedDevices = Arc<RwLock<Vec<DeviceInfo>>>;
 const INSTALL_BUTTON_COOLDOWN: Duration = Duration::from_secs(30);
 const UPDATE_VIEW_INTERVAL: Duration = Duration::from_secs(1);
 
+const MS: &str = "ms";
 const REPO_URL: &str = "https://github.com/MindsMaster/DeviceOut";
 const AUTHOR_EMAIL: &str = "an5w1r@163.com";
 const QQ_GROUP: &str = "1046048297";
@@ -70,10 +72,10 @@ struct EditorUi {
     check_mark_attempt: Option<i64>,
     prompt_wait: Option<PromptWait>,
     telemetry_opt_in: bool,
-    target_drag: Option<u32>,
-    queue_drag: Option<u32>,
+    target_text: String,
+    queue_text: String,
     send_watch: Option<(String, Instant)>,
-    send_note: Option<(Instant, String, egui::Color32)>,
+    note: Option<(Instant, String, egui::Color32)>,
 }
 
 impl Default for EditorUi {
@@ -85,10 +87,10 @@ impl Default for EditorUi {
             check_mark_attempt: None,
             prompt_wait: None,
             telemetry_opt_in: deviceout_update::telemetry::is_enabled(),
-            target_drag: None,
-            queue_drag: None,
+            target_text: String::new(),
+            queue_text: String::new(),
             send_watch: None,
-            send_note: None,
+            note: None,
         }
     }
 }
@@ -172,7 +174,7 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
                                     );
                                 });
                         });
-                    if let Some((at, text, color)) = state.send_note.as_ref() {
+                    if let Some((at, text, color)) = state.note.as_ref() {
                         let keep =
                             state.send_watch.is_some() || at.elapsed() < Duration::from_secs(4);
                         if keep {
@@ -375,23 +377,6 @@ fn fill_card(ui: &mut egui::Ui, s: &UiState) {
     });
 }
 
-fn target_step_index(steps: &[u32], ms: u32) -> usize {
-    steps
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, step)| step.abs_diff(ms))
-        .map(|(i, _)| i)
-        .unwrap_or(0)
-}
-
-fn allowed_target_steps(floor: u32) -> &'static [u32] {
-    let first = TARGET_MS_STEPS
-        .iter()
-        .position(|&s| s >= floor)
-        .unwrap_or(TARGET_MS_STEPS.len() - 1);
-    &TARGET_MS_STEPS[first..]
-}
-
 fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -435,41 +420,76 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
 fn tuning_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&UiState>) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
-
-        let steps = allowed_target_steps(w.engine.target_floor_ms());
-        let committed = w.engine.target_ms();
-        let shown = state.target_drag.unwrap_or(committed);
-        widgets::section_heading(
-            ui,
-            t().heading_target_latency,
-            Some(
-                egui::RichText::new(format!("{shown} ms"))
-                    .font(egui::FontId::monospace(12.0))
-                    .color(theme::TEXT),
-            ),
-        );
-        ui.add_space(8.0);
-
-        let mut idx = target_step_index(steps, shown);
-        let slider = widgets::stepped_slider(ui, &mut idx, steps.len());
-        let next = steps[idx.min(steps.len() - 1)];
-        if slider.dragged() {
-            state.target_drag = Some(next);
-        }
-        let commit = slider.drag_stopped() || (slider.clicked() && !slider.dragged());
-        if commit {
-            state.target_drag = None;
-            if next != committed {
-                *w.params.target_ms.write() = next;
-                w.engine.set_target_ms_async(next);
-            }
-        }
-
+        target_row(ui, state, w);
         ui.add_space(14.0);
-        queue_row(ui, state, w);
+        queue_row(ui, state, w, snap);
         ui.add_space(14.0);
         exclusive_row(ui, w, snap);
     });
+}
+
+fn note(state: &mut EditorUi, text: String, color: egui::Color32) {
+    state.note = Some((Instant::now(), text, color));
+}
+
+fn target_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
+    let floor = w.engine.target_floor_ms();
+    let committed = w.engine.target_ms();
+    if committed < floor {
+        *w.params.target_ms.write() = w.engine.request_target_ms(committed);
+    }
+
+    widgets::section_heading(ui, t().heading_target_latency, None);
+    ui.add_space(8.0);
+    let picked = widgets::number_combo(
+        ui,
+        "target_ms",
+        widgets::NumberCombo {
+            value: w.engine.target_ms(),
+            floor,
+            steps: TARGET_MS_STEPS,
+            unit: MS,
+            blocked: t().step_unavailable,
+            editable: true,
+        },
+        &mut state.target_text,
+    );
+    if let Some(wanted) = picked {
+        let applied = w.engine.request_target_ms(wanted);
+        *w.params.target_ms.write() = applied;
+        if applied != wanted {
+            let text = fill(t().target_floor_hit, &[("ms", &applied.to_string())]);
+            note(state, text, theme::AMBER);
+        }
+    }
+}
+
+fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&UiState>) {
+    let period_ms = device_period_ms(snap);
+    let steps: Vec<u32> = QUEUE_PERIOD_STEPS
+        .iter()
+        .map(|&n| queue_ms(n, period_ms))
+        .collect();
+
+    widgets::section_heading(ui, t().heading_device_queue, None);
+    ui.add_space(8.0);
+    let picked = widgets::number_combo(
+        ui,
+        "queue_ms",
+        widgets::NumberCombo {
+            value: queue_ms(w.engine.queue_periods(), period_ms),
+            floor: 0,
+            steps: &steps,
+            unit: MS,
+            blocked: t().step_unavailable,
+            editable: false,
+        },
+        &mut state.queue_text,
+    );
+    if let Some(ms) = picked {
+        let periods = (f64::from(ms) / period_ms).round() as u32;
+        *w.params.queue_periods.write() = w.engine.request_queue_periods(periods);
+    }
 }
 
 fn exclusive_row(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
@@ -478,7 +498,7 @@ fn exclusive_row(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
     ui.add_space(6.0);
     if widgets::switch(ui, &mut wanted).changed() {
         *w.params.exclusive.write() = wanted;
-        w.engine.set_exclusive_async(wanted);
+        w.engine.request_exclusive(wanted);
     }
     if wanted && snap.is_some_and(|s| !s.exclusive) {
         ui.add_space(6.0);
@@ -486,33 +506,14 @@ fn exclusive_row(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
     }
 }
 
-fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
-    let committed = w.engine.queue_periods();
-    let shown = state.queue_drag.unwrap_or(committed);
-    widgets::section_heading(
-        ui,
-        t().heading_device_queue,
-        Some(
-            egui::RichText::new(format!("{shown}×"))
-                .font(egui::FontId::monospace(12.0))
-                .color(theme::TEXT),
-        ),
-    );
-    ui.add_space(8.0);
+fn device_period_ms(snap: Option<&UiState>) -> f64 {
+    snap.map(|s| s.period_frames as f64 * 1.0e3 / s.sink_rate_hz)
+        .filter(|ms| ms.is_finite() && *ms > 0.0)
+        .unwrap_or(ASSUMED_PERIOD_MS)
+}
 
-    let mut idx = target_step_index(QUEUE_PERIOD_STEPS, shown);
-    let slider = widgets::stepped_slider(ui, &mut idx, QUEUE_PERIOD_STEPS.len());
-    let next = QUEUE_PERIOD_STEPS[idx.min(QUEUE_PERIOD_STEPS.len() - 1)];
-    if slider.dragged() {
-        state.queue_drag = Some(next);
-    }
-    if slider.drag_stopped() || (slider.clicked() && !slider.dragged()) {
-        state.queue_drag = None;
-        if next != committed {
-            *w.params.queue_periods.write() = next;
-            w.engine.set_queue_periods_async(next);
-        }
-    }
+fn queue_ms(periods: u32, period_ms: f64) -> u32 {
+    (f64::from(periods) * period_ms).round().max(1.0) as u32
 }
 
 fn mix_format_text(fmt: &StreamFormat) -> String {
@@ -825,7 +826,7 @@ fn open_feedback(
                 *slot.lock() = Some(result);
             });
         let Ok(thread) = thread else {
-            state.send_note = Some((
+            state.note = Some((
                 Instant::now(),
                 t().feedback_window_failed.into(),
                 theme::RED,
@@ -865,11 +866,11 @@ fn poll_prompt(state: &mut EditorUi) {
         Ok(id) => {
             deviceout_update::spawn_updater(&[OsStr::new("--send-outbox")]);
             state.send_watch = Some((id, Instant::now()));
-            state.send_note = Some((Instant::now(), t().sending.into(), theme::TEXT_DIM));
+            state.note = Some((Instant::now(), t().sending.into(), theme::TEXT_DIM));
         }
         Err(msg) => {
             state.send_watch = None;
-            state.send_note = Some((Instant::now(), msg, theme::RED));
+            state.note = Some((Instant::now(), msg, theme::RED));
         }
     }
 }
@@ -882,17 +883,17 @@ fn poll_send(state: &mut EditorUi) {
     let elapsed = since.elapsed();
     if outbox_file(&deviceout_update::sent_dir(), &id).is_file() {
         state.send_watch = None;
-        state.send_note = Some((Instant::now(), t().sent.into(), theme::GREEN));
+        state.note = Some((Instant::now(), t().sent.into(), theme::GREEN));
         return;
     }
     if outbox_file(&deviceout_update::failed_dir(), &id).is_file() {
         state.send_watch = None;
-        state.send_note = Some((Instant::now(), t().send_failed.into(), theme::RED));
+        state.note = Some((Instant::now(), t().send_failed.into(), theme::RED));
         return;
     }
     if elapsed >= Duration::from_secs(25) {
         state.send_watch = None;
-        state.send_note = Some((Instant::now(), t().saved_will_retry.into(), theme::AMBER));
+        state.note = Some((Instant::now(), t().saved_will_retry.into(), theme::AMBER));
     }
 }
 
@@ -964,4 +965,3 @@ fn queue_feedback(
         .map_err(|e| format!("{}{e}", t().feedback_save_failed))?;
     Ok(item.id)
 }
-

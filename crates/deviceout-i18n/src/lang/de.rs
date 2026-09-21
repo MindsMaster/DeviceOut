@@ -19,6 +19,8 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "Gerätepuffer",
     heading_exclusive: "Exklusivmodus",
     exclusive_fell_back: "Exklusivmodus nicht verfügbar, gemeinsamer Modus wird verwendet",
+    step_unavailable: "Host-Blockgröße zu groß",
+    target_floor_hit: "{ms} ms ist hier der niedrigste Wert",
     mix_format: "{rate} Hz / {channels} Kan. / {sample}",
     sample_f32: "32-Bit-Fließkomma",
     sample_i16: "16-Bit-Ganzzahl",

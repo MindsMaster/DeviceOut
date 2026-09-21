@@ -19,6 +19,8 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "Cola del dispositivo",
     heading_exclusive: "Modo exclusivo",
     exclusive_fell_back: "Modo exclusivo no disponible, usando modo compartido",
+    step_unavailable: "bloque del host demasiado grande",
+    target_floor_hit: "{ms} ms es el mínimo disponible aquí",
     mix_format: "{rate} Hz / {channels} can. / {sample}",
     sample_f32: "coma flotante de 32 bits",
     sample_i16: "entero de 16 bits",

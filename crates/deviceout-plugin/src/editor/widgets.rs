@@ -184,48 +184,238 @@ pub(crate) fn status_indicator(ui: &mut egui::Ui, state: Option<EngineState>) {
     });
 }
 
-pub(crate) fn stepped_slider(ui: &mut egui::Ui, index: &mut usize, steps: usize) -> Response {
-    let steps = steps.max(2);
-    let last = steps - 1;
-    let (rect, mut response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), 16.0),
-        Sense::click_and_drag(),
+pub(crate) struct NumberCombo<'a> {
+    pub value: u32,
+    pub floor: u32,
+    pub steps: &'a [u32],
+    pub unit: &'a str,
+    pub blocked: &'a str,
+    pub editable: bool,
+}
+
+pub(crate) fn number_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    combo: NumberCombo<'_>,
+    buf: &mut String,
+) -> Option<u32> {
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
+    let popup_id = ui.make_persistent_id(id);
+
+    let painter = ui.painter().clone();
+    let frame = painter.add(Shape::Noop);
+
+    let arrow_rect = Rect::from_min_max(Pos2::new(rect.right() - 32.0, rect.top()), rect.max);
+    let hit = if combo.editable { arrow_rect } else { rect };
+    let arrow = ui.interact(hit, popup_id.with("arrow"), Sense::click());
+    if arrow.clicked() {
+        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+    }
+    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+
+    let unit_width = painter
+        .layout_no_wrap(
+            combo.unit.to_string(),
+            FontId::monospace(11.0),
+            theme::TEXT_FAINT,
+        )
+        .size()
+        .x;
+    let edit_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + 12.0, rect.top()),
+        Pos2::new(arrow_rect.left() - unit_width - 12.0, rect.bottom()),
     );
-
-    let pad = 5.0;
-    let x0 = rect.left() + pad;
-    let x1 = rect.right() - pad;
-    let span = (x1 - x0).max(1.0);
-    let cy = rect.center().y;
-
-    if let Some(pos) = response.interact_pointer_pos() {
-        if response.clicked() || response.dragged() {
-            let t = ((pos.x - x0) / span).clamp(0.0, 1.0);
-            let next = (t * last as f32).round() as usize;
-            if next != *index {
-                *index = next;
-                response.mark_changed();
+    let mut picked = None;
+    let edit = if combo.editable {
+        let mut field = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(edit_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let edit = field.add(
+            egui::TextEdit::singleline(buf)
+                .frame(false)
+                .font(FontId::monospace(14.0))
+                .text_color(theme::TEXT)
+                .desired_width(f32::INFINITY),
+        );
+        if edit.lost_focus() {
+            picked = buf.trim().parse::<u32>().ok();
+        }
+        if !edit.has_focus() {
+            let shown = combo.value.to_string();
+            if *buf != shown {
+                *buf = shown;
             }
         }
-    }
-
-    let t = (*index).min(last) as f32 / last as f32;
-    let painter = ui.painter();
-    let track = Rect::from_min_max(Pos2::new(x0, cy - 1.5), Pos2::new(x1, cy + 1.5));
-    painter.rect_filled(track, 1.5, theme::TRACK);
-    if t > 0.002 {
-        let filled = Rect::from_min_max(track.min, Pos2::new(x0 + span * t, track.max.y));
-        painter.rect_filled(filled, 1.5, theme::TEXT);
-    }
-
-    let thumb = Pos2::new(x0 + span * t, cy);
-    let r = if response.hovered() || response.dragged() {
-        5.0
+        Some(edit)
     } else {
-        4.5
+        painter.text(
+            Pos2::new(edit_rect.left(), rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            combo.value,
+            FontId::monospace(14.0),
+            theme::TEXT,
+        );
+        None
     };
-    painter.circle_filled(thumb, r, theme::PRIMARY);
 
+    let focused = edit.as_ref().is_some_and(|e| e.has_focus());
+    let hovered = edit.as_ref().is_some_and(|e| e.hovered());
+    let border = if focused {
+        theme::PRIMARY
+    } else if open || arrow.hovered() || hovered {
+        theme::MENU_BORDER
+    } else {
+        theme::OUTLINE
+    };
+    painter.set(
+        frame,
+        egui::epaint::RectShape::new(
+            rect,
+            theme::CORNER_BUTTON,
+            theme::WIDGET,
+            Stroke::new(1.0_f32, border),
+            StrokeKind::Inside,
+        ),
+    );
+    painter.text(
+        Pos2::new(arrow_rect.left() - 10.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        combo.unit,
+        FontId::monospace(11.0),
+        theme::TEXT_FAINT,
+    );
+    let center = Pos2::new(arrow_rect.center().x, rect.center().y);
+    let direction = if open { -1.0 } else { 1.0 };
+    painter.add(Shape::line(
+        vec![
+            center + Vec2::new(-3.5, -1.75 * direction),
+            center + Vec2::new(0.0, 1.75 * direction),
+            center + Vec2::new(3.5, -1.75 * direction),
+        ],
+        Stroke::new(1.5_f32, theme::TEXT_DIM),
+    ));
+
+    if open {
+        let screen = ui.ctx().screen_rect();
+        let wanted = combo.steps.len() as f32 * 32.0 + 12.0;
+        let below = (screen.bottom() - rect.bottom() - 13.0).max(0.0);
+        let above = (rect.top() - screen.top() - 13.0).max(0.0);
+        let placement = if below >= wanted || below >= above {
+            egui::AboveOrBelow::Below
+        } else {
+            egui::AboveOrBelow::Above
+        };
+        let room = match placement {
+            egui::AboveOrBelow::Below => below,
+            egui::AboveOrBelow::Above => above,
+        };
+        let mut anchor = arrow.clone();
+        anchor.rect = rect.expand2(Vec2::new(0.0, 5.0));
+        ui.scope(|ui| {
+            let style = ui.style_mut();
+            style.spacing.menu_margin = egui::Margin::same(6);
+            style.visuals.window_fill = theme::MENU;
+            style.visuals.window_stroke = Stroke::new(1.0_f32, theme::MENU_BORDER);
+            style.visuals.menu_corner_radius = theme::CORNER;
+            style.visuals.popup_shadow = egui::epaint::Shadow {
+                offset: [0, 6],
+                blur: 20,
+                spread: 2,
+                color: Color32::from_black_alpha(100),
+            };
+            egui::popup::popup_above_or_below_widget(
+                ui,
+                popup_id,
+                &anchor,
+                placement,
+                egui::PopupCloseBehavior::CloseOnClickOutside,
+                |ui| {
+                    ui.set_width((width - 14.0).max(1.0));
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    let mut scroll = egui::style::ScrollStyle::floating();
+                    scroll.bar_width = 6.0;
+                    scroll.floating_width = 3.0;
+                    scroll.floating_allocated_width = 8.0;
+                    scroll.handle_min_length = 32.0;
+                    scroll.dormant_handle_opacity = 0.25;
+                    scroll.active_handle_opacity = 0.35;
+                    scroll.interact_handle_opacity = 0.65;
+                    scroll.active_background_opacity = 0.0;
+                    scroll.interact_background_opacity = 0.0;
+                    ui.spacing_mut().scroll = scroll;
+                    egui::ScrollArea::vertical()
+                        .max_height((room - 14.0).clamp(1.0, 280.0))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for &step in combo.steps {
+                                let hint = if step < combo.floor {
+                                    Some(combo.blocked)
+                                } else {
+                                    None
+                                };
+                                let label = format!("{step} {}", combo.unit);
+                                if combo_option(ui, &label, hint, step == combo.value).clicked()
+                                    && hint.is_none()
+                                {
+                                    picked = Some(step);
+                                    ui.memory_mut(|memory| memory.close_popup());
+                                }
+                            }
+                        });
+                },
+            );
+        });
+    }
+
+    picked.filter(|&v| v != combo.value)
+}
+
+fn combo_option(ui: &mut egui::Ui, label: &str, hint: Option<&str>, selected: bool) -> Response {
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::click());
+    let dim = hint.is_some();
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let fill = if dim {
+            Color32::TRANSPARENT
+        } else if response.hovered() || response.is_pointer_button_down_on() {
+            theme::MENU_HOVER
+        } else if selected {
+            theme::MENU_SELECTED
+        } else {
+            Color32::TRANSPARENT
+        };
+        painter.rect_filled(rect, theme::CORNER_SMALL, fill);
+        painter.text(
+            Pos2::new(rect.left() + 10.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            FontId::monospace(12.5),
+            if dim { theme::TEXT_FAINT } else { theme::TEXT },
+        );
+        if let Some(hint) = hint {
+            painter.text(
+                Pos2::new(rect.right() - 10.0, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                hint,
+                FontId::proportional(10.5),
+                theme::TEXT_FAINT,
+            );
+        } else if selected {
+            let center = Pos2::new(rect.right() - 14.0, rect.center().y);
+            painter.add(Shape::line(
+                vec![
+                    center + Vec2::new(-4.0, 0.0),
+                    center + Vec2::new(-1.0, 3.0),
+                    center + Vec2::new(5.0, -4.0),
+                ],
+                Stroke::new(1.6_f32, theme::TEXT),
+            ));
+        }
+    }
     response
 }
 
@@ -244,7 +434,10 @@ pub(crate) fn progress_bar(ui: &mut egui::Ui, fraction: f64, target: f64) {
     let mark = target.clamp(0.0, 1.0) as f32;
     if mark > 0.002 {
         let x = rect.min.x + rect.width() * mark;
-        let tick = Rect::from_min_max(Pos2::new(x - 1.0, rect.min.y - 2.0), Pos2::new(x + 1.0, rect.max.y + 2.0));
+        let tick = Rect::from_min_max(
+            Pos2::new(x - 1.0, rect.min.y - 2.0),
+            Pos2::new(x + 1.0, rect.max.y + 2.0),
+        );
         painter.rect_filled(tick, 1.0, theme::GREEN);
     }
 }

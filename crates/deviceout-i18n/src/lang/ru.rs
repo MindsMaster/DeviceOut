@@ -19,6 +19,8 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "Очередь устройства",
     heading_exclusive: "Монопольный режим",
     exclusive_fell_back: "Монопольный режим недоступен, используется общий",
+    step_unavailable: "блок хоста слишком велик",
+    target_floor_hit: "{ms} мс — минимум для этой системы",
     mix_format: "{rate} Hz / {channels} кан. / {sample}",
     sample_f32: "32-бит с плавающей точкой",
     sample_i16: "16-бит целое",

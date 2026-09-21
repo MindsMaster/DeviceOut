@@ -18,6 +18,8 @@ pub struct Strings {
     pub heading_device_queue: &'static str,
     pub heading_exclusive: &'static str,
     pub exclusive_fell_back: &'static str,
+    pub step_unavailable: &'static str,
+    pub target_floor_hit: &'static str,
     pub mix_format: &'static str,
     pub sample_f32: &'static str,
     pub sample_i16: &'static str,
