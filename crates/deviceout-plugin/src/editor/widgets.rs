@@ -442,6 +442,8 @@ pub(crate) fn progress_bar(ui: &mut egui::Ui, fraction: f64, target: f64) {
     }
 }
 
+const SPINNER_ROOM: f32 = 12.0;
+
 fn stat_label(ui: &mut egui::Ui, label: &str) {
     ui.vertical_centered(|ui| {
         ui.add(
@@ -456,10 +458,10 @@ fn stat_label(ui: &mut egui::Ui, label: &str) {
     });
 }
 
-fn stat_value(ui: &mut egui::Ui, value: &str, unit: &str, color: Color32) {
+fn stat_value(ui: &mut egui::Ui, value: &str, unit: &str, color: Color32, busy: bool) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
-        let total = value_width(ui, value, unit);
+        let total = value_width(ui, value, unit) + if busy { SPINNER_ROOM } else { 0.0 };
         ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
         ui.label(
             RichText::new(value)
@@ -474,6 +476,10 @@ fn stat_value(ui: &mut egui::Ui, value: &str, unit: &str, color: Color32) {
                     .color(theme::TEXT_FAINT),
             );
         }
+        if busy {
+            ui.add_space(3.0);
+            ui.add(egui::Spinner::new().size(9.0).color(theme::AMBER));
+        }
     });
 }
 
@@ -483,12 +489,13 @@ pub(crate) fn stat_cell(
     value: &str,
     unit: &str,
     color: Color32,
+    busy: bool,
 ) -> Response {
     ui.vertical(|ui| {
         ui.set_min_width(ui.available_width());
         stat_label(ui, label);
         ui.add_space(3.0);
-        stat_value(ui, value, unit, color);
+        stat_value(ui, value, unit, color, busy);
     })
     .response
 }

@@ -388,18 +388,27 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
                     &format!("{:.0}", s.latency_ms),
                     "ms",
                     theme::TEXT,
+                    false,
                 );
-                let (drift, drift_color) = match s.drift_ppm {
-                    Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT),
-                    None => (format!("{:+.0}…", s.raw_drift_ppm), theme::TEXT_DIM),
+                let (drift, drift_color, settling) = match s.drift_ppm {
+                    Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT, false),
+                    None => (format!("{:+.1}", s.raw_drift_ppm), theme::TEXT_DIM, true),
                 };
-                widgets::stat_cell(&mut cols[1], t().heading_drift, &drift, "ppm", drift_color);
+                widgets::stat_cell(
+                    &mut cols[1],
+                    t().heading_drift,
+                    &drift,
+                    "ppm",
+                    drift_color,
+                    settling,
+                );
                 widgets::stat_cell(
                     &mut cols[2],
                     t().heading_format,
                     &format!("{:.1}", s.sink_rate_hz / 1000.0),
                     "kHz",
                     theme::TEXT,
+                    false,
                 );
             }
             None => {
@@ -409,9 +418,24 @@ fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
                     "—",
                     "",
                     theme::TEXT_FAINT,
+                    false,
                 );
-                widgets::stat_cell(&mut cols[1], t().heading_drift, "—", "", theme::TEXT_FAINT);
-                widgets::stat_cell(&mut cols[2], t().heading_format, "—", "", theme::TEXT_FAINT);
+                widgets::stat_cell(
+                    &mut cols[1],
+                    t().heading_drift,
+                    "—",
+                    "",
+                    theme::TEXT_FAINT,
+                    false,
+                );
+                widgets::stat_cell(
+                    &mut cols[2],
+                    t().heading_format,
+                    "—",
+                    "",
+                    theme::TEXT_FAINT,
+                    false,
+                );
             }
         });
     });
