@@ -149,6 +149,110 @@ fn outline_button_sized(ui: &mut egui::Ui, label: &str, stretch: bool) -> Respon
     )
 }
 
+pub(crate) fn tab_bar(ui: &mut egui::Ui, selected: &mut usize, labels: &[&str]) -> bool {
+    let (rect, _) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), TAB_HEIGHT), Sense::hover());
+    let id = ui.make_persistent_id("deviceout_tabs");
+    let painter = ui.painter().clone();
+    painter.rect(
+        rect,
+        theme::CORNER_BUTTON,
+        theme::CARD,
+        Stroke::new(1.0_f32, theme::BORDER),
+        StrokeKind::Inside,
+    );
+
+    let inner = rect.shrink(TAB_PAD);
+    let slot = inner.width() / labels.len().max(1) as f32;
+    let wanted = inner.left() + slot * *selected as f32;
+    let x = ui
+        .ctx()
+        .animate_value_with_time(id.with("pill"), wanted, 0.22);
+    painter.rect_filled(
+        Rect::from_min_size(Pos2::new(x, inner.top()), Vec2::new(slot, inner.height())),
+        theme::CORNER_SMALL,
+        theme::WIDGET_HOVER,
+    );
+
+    let mut changed = false;
+    for (index, label) in labels.iter().enumerate() {
+        let slot_rect = Rect::from_min_size(
+            Pos2::new(inner.left() + slot * index as f32, inner.top()),
+            Vec2::new(slot, inner.height()),
+        );
+        let response = ui.interact(slot_rect, id.with(index), Sense::click());
+        if response.clicked() && index != *selected {
+            *selected = index;
+            changed = true;
+        }
+        let lit = hover_amount(ui, &response);
+        let color = if index == *selected {
+            theme::TEXT
+        } else {
+            mix(theme::TEXT_DIM, theme::TEXT, lit)
+        };
+        let galley = painter.layout_no_wrap(label.to_string(), FontId::proportional(12.5), color);
+        let pos = Pos2::new(
+            slot_rect.center().x - galley.size().x / 2.0,
+            slot_rect.center().y - galley.size().y / 2.0,
+        );
+        painter.with_clip_rect(slot_rect).galley(pos, galley, color);
+    }
+    changed
+}
+
+pub(crate) fn settings_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(ROW_HEIGHT);
+        let label_width = (ui.available_width() * LABEL_SHARE).max(1.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(label_width, ROW_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(label)
+                            .font(FontId::proportional(13.0))
+                            .color(theme::TEXT),
+                    )
+                    .wrap(),
+                );
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
+    });
+}
+
+pub(crate) fn row_divider(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        Stroke::new(1.0_f32, theme::BORDER),
+    );
+}
+
+pub(crate) fn kv_row(ui: &mut egui::Ui, key: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(24.0);
+        ui.label(
+            RichText::new(key)
+                .font(FontId::proportional(12.0))
+                .color(theme::TEXT_DIM),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(value)
+                        .font(FontId::monospace(12.0))
+                        .color(theme::TEXT),
+                )
+                .truncate(),
+            );
+        });
+    });
+}
+
 pub(crate) fn switch(ui: &mut egui::Ui, on: &mut bool) -> Response {
     let (rect, mut response) = ui.allocate_exact_size(Vec2::new(42.0, 24.0), Sense::click());
     if response.clicked() {
@@ -222,6 +326,7 @@ pub(crate) fn status_indicator(ui: &mut egui::Ui, state: Option<EngineState>) {
 }
 
 pub(crate) struct NumberCombo<'a> {
+    pub width: f32,
     pub value: u32,
     pub floor: u32,
     pub ceiling: u32,
@@ -232,6 +337,10 @@ pub(crate) struct NumberCombo<'a> {
 }
 
 const PX_PER_STEP: f32 = 4.0;
+const TAB_HEIGHT: f32 = 34.0;
+const TAB_PAD: f32 = 3.0;
+const ROW_HEIGHT: f32 = 40.0;
+const LABEL_SHARE: f32 = 0.55;
 
 pub(crate) fn number_combo(
     ui: &mut egui::Ui,
@@ -239,7 +348,7 @@ pub(crate) fn number_combo(
     combo: NumberCombo<'_>,
     drag: &mut Option<u32>,
 ) -> Option<u32> {
-    let width = ui.available_width();
+    let width = combo.width.min(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
     let popup_id = ui.make_persistent_id(id);
 
@@ -806,10 +915,23 @@ fn refresh_icon(painter: &egui::Painter, center: Pos2, radius: f32, color: Color
 }
 
 pub(crate) fn alert_line(ui: &mut egui::Ui, color: Color32, text: &str) -> Response {
+    alert_line_sized(ui, color, text, false)
+}
+
+pub(crate) fn alert_line_compact(ui: &mut egui::Ui, color: Color32, text: &str) -> Response {
+    alert_line_sized(ui, color, text, true)
+}
+
+fn alert_line_sized(ui: &mut egui::Ui, color: Color32, text: &str, compact: bool) -> Response {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 14.0), Sense::hover());
         ui.painter().circle_filled(rect.center(), 2.5, color);
-        ui.add(egui::Label::new(RichText::new(text).size(11.5).color(theme::TEXT_DIM)).wrap())
+        let label = egui::Label::new(RichText::new(text).size(11.5).color(theme::TEXT_DIM));
+        ui.add(if compact {
+            label.truncate()
+        } else {
+            label.wrap()
+        })
     })
     .inner
 }

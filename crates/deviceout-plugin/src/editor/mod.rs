@@ -13,8 +13,8 @@ use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
 use crate::{
-    enumerate_devices, DeviceOutParams, EngineController, UiState, MAX_TARGET_MS,
-    QUEUE_PERIOD_STEPS, TARGET_MS_STEPS,
+    enumerate_devices, DeviceOutParams, EngineController, UiState, DEFAULT_QUEUE_PERIODS,
+    DEFAULT_TARGET_MS, MAX_TARGET_MS, QUEUE_PERIOD_STEPS, TARGET_MS_STEPS,
 };
 use deviceout_engine::ASSUMED_PERIOD_MS;
 
@@ -32,6 +32,12 @@ const INSTALL_BUTTON_COOLDOWN: Duration = Duration::from_secs(30);
 const UPDATE_VIEW_INTERVAL: Duration = Duration::from_secs(1);
 
 const MS: &str = "ms";
+const PPM: &str = "ppm";
+const COMBO_WIDTH: f32 = 118.0;
+const AT_TARGET_TOLERANCE: f64 = 0.03;
+const MAX_ALERTS: usize = 1;
+const TAB_TUNE: usize = 1;
+const TAB_ABOUT: usize = 2;
 const REPO_URL: &str = "https://github.com/MindsMaster/DeviceOut";
 const AUTHOR_EMAIL: &str = "an5w1r@163.com";
 const QQ_GROUP: &str = "1046048297";
@@ -72,6 +78,7 @@ struct EditorUi {
     check_mark_attempt: Option<i64>,
     prompt_wait: Option<PromptWait>,
     telemetry_opt_in: bool,
+    tab: usize,
     target_drag: Option<u32>,
     queue_drag: Option<u32>,
     send_watch: Option<(String, Instant)>,
@@ -87,6 +94,7 @@ impl Default for EditorUi {
             check_mark_attempt: None,
             prompt_wait: None,
             telemetry_opt_in: deviceout_update::telemetry::is_enabled(),
+            tab: 0,
             target_drag: None,
             queue_drag: None,
             send_watch: None,
@@ -106,84 +114,44 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
         move |ctx, _setter, state| {
             ctx.request_repaint_after(Duration::from_millis(100));
 
+            let snap = snapshot(&w.engine);
             egui::CentralPanel::default()
                 .frame(theme::root_frame())
                 .show(ctx, |ui| {
-                    let height = ui.available_height();
-                    egui::ScrollArea::vertical()
-                        .id_salt("deviceout_root")
-                        .auto_shrink([false, false])
-                        .max_height(height)
-                        .min_scrolled_height(height)
-                        .scroll_bar_visibility(
-                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
-                        )
-                        .show(ui, |ui| {
-                            egui::Frame::new()
-                                .inner_margin(egui::Margin {
-                                    right: 12,
-                                    ..egui::Margin::ZERO
-                                })
-                                .show(ui, |ui| {
-                                    let snap = snapshot(&w.engine);
-
-                                    header(ui, snap.as_ref());
-                                    ui.add_space(12.0);
-                                    device_card(ui, &w, snap.as_ref());
-                                    ui.add_space(12.0);
-
-                                    match &snap {
-                                        Some(s) => {
-                                            fill_card(ui, s);
-                                            ui.add_space(12.0);
-                                            stats_card(ui, Some(s));
-                                            ui.add_space(12.0);
-                                            tuning_card(ui, state, &w, snap.as_ref());
-                                        }
-                                        None => {
-                                            stats_card(ui, None);
-                                            ui.add_space(12.0);
-                                            tuning_card(ui, state, &w, snap.as_ref());
-                                            ui.add_space(12.0);
-                                            idle_card(ui);
-                                        }
-                                    }
-
-                                    ui.add_space(12.0);
-                                    let device_line = {
-                                        let id = w.params.device_id.read().clone();
-                                        w.devices
-                                            .read()
-                                            .iter()
-                                            .find(|d| d.id == id)
-                                            .map(|d| format!("{} | {}", d.name, d.mix_format))
-                                            .unwrap_or_else(|| {
-                                                if id.is_empty() {
-                                                    "none".into()
-                                                } else {
-                                                    id
-                                                }
-                                            })
-                                    };
-                                    footer_card(
-                                        ui,
-                                        state,
-                                        bundle.as_ref(),
-                                        snap.as_ref(),
-                                        &device_line,
-                                    );
-                                });
-                        });
-                    if let Some((at, text, color)) = state.note.as_ref() {
-                        let keep =
-                            state.send_watch.is_some() || at.elapsed() < Duration::from_secs(4);
-                        if keep {
-                            widgets::toast(ctx, text, *color);
-                        }
-                    }
+                    body(ui, state, &w, bundle.as_ref(), snap.as_ref())
                 });
         },
     )
+}
+
+fn body(
+    ui: &mut egui::Ui,
+    state: &mut EditorUi,
+    w: &Wiring,
+    bundle: Option<&PathBuf>,
+    snap: Option<&UiState>,
+) {
+    header(ui, snap);
+    ui.add_space(8.0);
+    status_card(ui, snap);
+    ui.add_space(8.0);
+
+    let labels = [t().tab_run, t().tab_tune, t().tab_about];
+    widgets::tab_bar(ui, &mut state.tab, &labels);
+    ui.add_space(8.0);
+
+    match state.tab {
+        TAB_TUNE => tune_pane(ui, state, w, snap),
+        TAB_ABOUT => about_pane(ui, state, bundle, snap, w),
+        _ => run_pane(ui, w, snap),
+    }
+
+    if let Some((at, text, color)) = state.note.as_ref() {
+        let keep = state.send_watch.is_some() || at.elapsed() < Duration::from_secs(4);
+        if keep {
+            widgets::toast(ui.ctx(), text, *color);
+        }
+    }
 }
 
 fn snapshot(engine: &EngineController) -> Option<UiState> {
@@ -248,19 +216,14 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             {
                 let _ = open::that_detached(format!("mailto:{AUTHOR_EMAIL}"));
             }
-
-            if let Some(pref) = widgets::language_menu(ui) {
-                deviceout_i18n::set_preference(pref);
-                theme::install_fonts(ui.ctx(), deviceout_i18n::current().script());
-            }
         });
     });
 }
 
-fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
-    theme::card_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
+fn device_section(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
+    ui.set_width(ui.available_width());
 
+    {
         let current_id = w.params.device_id.read().clone();
         let format_text = w
             .devices
@@ -329,7 +292,7 @@ fn device_card(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
                 ui.add(egui::Label::new(&message).wrap());
             });
         }
-    });
+    }
 }
 
 fn fault_text(fault: &Fault, t: &Strings) -> String {
@@ -360,96 +323,254 @@ fn fault_text(fault: &Fault, t: &Strings) -> String {
     }
 }
 
-fn fill_card(ui: &mut egui::Ui, s: &UiState) {
+fn status_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        widgets::section_heading(
-            ui,
-            t().heading_buffer,
-            Some(
-                egui::RichText::new(format!("{:.0}%", s.fill_fraction * 100.0))
-                    .font(egui::FontId::monospace(12.0))
-                    .color(theme::TEXT_DIM),
-            ),
-        );
-        ui.add_space(6.0);
-        widgets::progress_bar(ui, s.fill_fraction, s.target_fraction);
-    });
-}
-
-fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
-    theme::card_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.columns(3, |cols| match snap {
-            Some(s) => {
-                widgets::stat_cell(
-                    &mut cols[0],
-                    t().heading_latency,
-                    &format!("{:.0}", s.latency_ms),
-                    "ms",
-                    theme::TEXT,
-                    false,
-                );
-                let (drift, drift_color, settling) = match s.drift_ppm {
-                    Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT, false),
-                    None => (format!("{:+.1}", s.raw_drift_ppm), theme::TEXT_DIM, true),
+        status_cells(ui, snap);
+        ui.add_space(10.0);
+        let (fill_fraction, target) =
+            snap.map_or((0.0, 0.0), |s| (s.fill_fraction, s.target_fraction));
+        widgets::progress_bar(ui, fill_fraction, target);
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            widgets::heading_text(ui, t().heading_buffer);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let trailing = match snap {
+                    None => "\u{2014}".to_string(),
+                    Some(_) if (fill_fraction - target).abs() <= AT_TARGET_TOLERANCE => {
+                        t().buffer_at_target.to_string()
+                    }
+                    Some(_) => format!("{:.0}%", fill_fraction * 100.0),
                 };
-                widgets::stat_cell(
-                    &mut cols[1],
-                    t().heading_drift,
-                    &drift,
-                    "ppm",
-                    drift_color,
-                    settling,
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(trailing)
+                            .font(egui::FontId::monospace(11.0))
+                            .color(theme::TEXT_DIM),
+                    )
+                    .truncate(),
                 );
-                widgets::stat_cell(
-                    &mut cols[2],
-                    t().heading_format,
-                    &format!("{:.1}", s.sink_rate_hz / 1000.0),
-                    "kHz",
-                    theme::TEXT,
-                    false,
-                );
-            }
-            None => {
-                widgets::stat_cell(
-                    &mut cols[0],
-                    t().heading_latency,
-                    "—",
-                    "",
-                    theme::TEXT_FAINT,
-                    false,
-                );
-                widgets::stat_cell(
-                    &mut cols[1],
-                    t().heading_drift,
-                    "—",
-                    "",
-                    theme::TEXT_FAINT,
-                    false,
-                );
-                widgets::stat_cell(
-                    &mut cols[2],
-                    t().heading_format,
-                    "—",
-                    "",
-                    theme::TEXT_FAINT,
-                    false,
-                );
-            }
+            });
         });
     });
 }
 
-fn tuning_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&UiState>) {
+fn status_cells(ui: &mut egui::Ui, snap: Option<&UiState>) {
+    ui.columns(3, |cols| match snap {
+        Some(s) => {
+            widgets::stat_cell(
+                &mut cols[0],
+                t().heading_latency,
+                &format!("{:.0}", s.latency_ms),
+                MS,
+                theme::TEXT,
+                false,
+            );
+            let (drift, drift_color, settling) = match s.drift_ppm {
+                Some(ppm) => (format!("{ppm:+.2}"), theme::TEXT, false),
+                None => (format!("{:+.1}", s.raw_drift_ppm), theme::TEXT_DIM, true),
+            };
+            widgets::stat_cell(
+                &mut cols[1],
+                t().heading_drift,
+                &drift,
+                PPM,
+                drift_color,
+                settling,
+            );
+            let dropouts = dropout_count(s);
+            let color = if dropouts == 0 {
+                theme::TEXT
+            } else {
+                theme::AMBER
+            };
+            widgets::stat_cell(
+                &mut cols[2],
+                t().heading_dropouts,
+                &dropouts.to_string(),
+                "",
+                color,
+                false,
+            );
+        }
+        None => {
+            for (index, title) in [t().heading_latency, t().heading_drift, t().heading_dropouts]
+                .into_iter()
+                .enumerate()
+            {
+                widgets::stat_cell(
+                    &mut cols[index],
+                    title,
+                    "\u{2014}",
+                    "",
+                    theme::TEXT_FAINT,
+                    false,
+                );
+            }
+        }
+    });
+}
+
+fn dropout_count(s: &UiState) -> u64 {
+    s.underruns + s.overruns + s.device_starvations
+}
+
+fn run_pane(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
+    theme::card_frame().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        device_section(ui, w, snap);
+        widgets::row_divider(ui);
+        match snap.filter(|s| s.sink_rate_hz > 0.0) {
+            Some(s) => stream_section(ui, s),
+            None => idle_section(ui),
+        }
+    });
+}
+
+fn stream_section(ui: &mut egui::Ui, s: &UiState) {
+    {
+        widgets::kv_row(
+            ui,
+            t().heading_period,
+            &format!("{:.1} {MS}", device_period_ms(Some(s))),
+        );
+        widgets::kv_row(
+            ui,
+            t().heading_mode,
+            if s.exclusive {
+                t().mode_exclusive
+            } else {
+                t().mode_shared
+            },
+        );
+        let tooltip_width = ui.available_width();
+        for alert in stream_alerts(s).into_iter().take(MAX_ALERTS) {
+            ui.add_space(6.0);
+            widgets::alert_line_compact(ui, theme::AMBER, &alert).on_hover_ui(|ui| {
+                ui.set_max_width(tooltip_width);
+                ui.add(egui::Label::new(&alert).wrap());
+            });
+        }
+    }
+}
+
+fn stream_alerts(s: &UiState) -> Vec<String> {
+    let t = t();
+    let mut alerts = Vec::new();
+    if dropout_count(s) > 0 {
+        alerts.push(fill(
+            t.alert_dropouts,
+            &[
+                ("underruns", &s.underruns.to_string()),
+                ("overruns", &s.overruns.to_string()),
+                ("seconds", &format!("{:.1}", s.dropout_seconds)),
+            ],
+        ));
+    }
+    if s.reconnects > 0 {
+        let seconds = if s.sink_rate_hz > 0.0 {
+            s.frames_discarded as f64 / s.sink_rate_hz
+        } else {
+            0.0
+        };
+        alerts.push(fill(
+            t.alert_reconnects,
+            &[
+                ("count", &s.reconnects.to_string()),
+                ("frames", &s.frames_discarded.to_string()),
+                ("seconds", &format!("{seconds:.1}")),
+            ],
+        ));
+    }
+    if s.clamp_events > 0 {
+        alerts.push(fill(
+            t.alert_clamps,
+            &[("count", &s.clamp_events.to_string())],
+        ));
+    }
+    alerts
+}
+
+fn tune_pane(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&UiState>) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         target_row(ui, state, w);
-        ui.add_space(14.0);
+        widgets::row_divider(ui);
         queue_row(ui, state, w, snap);
-        ui.add_space(14.0);
+        widgets::row_divider(ui);
         exclusive_row(ui, state, w, snap);
     });
+    ui.add_space(8.0);
+    if widgets::outline_button(ui, t().restore_defaults).clicked() {
+        restore_defaults(state, w);
+    }
+}
+
+fn restore_defaults(state: &mut EditorUi, w: &Wiring) {
+    *w.params.queue_periods.write() = w.engine.request_queue_periods(DEFAULT_QUEUE_PERIODS);
+    let applied = w.engine.request_target_ms(DEFAULT_TARGET_MS);
+    *w.params.target_ms.write() = applied;
+    w.engine.request_exclusive(false);
+    *w.params.exclusive.write() = false;
+    state.target_drag = None;
+    state.queue_drag = None;
+    if applied != DEFAULT_TARGET_MS {
+        let text = fill(t().target_floor_hit, &[("ms", &applied.to_string())]);
+        note(state, text, theme::AMBER);
+    }
+}
+
+fn about_pane(
+    ui: &mut egui::Ui,
+    state: &mut EditorUi,
+    bundle: Option<&PathBuf>,
+    snap: Option<&UiState>,
+    w: &Wiring,
+) {
+    poll_prompt(state);
+    poll_send(state);
+    theme::card_frame().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        update_row(ui, state, bundle);
+        widgets::row_divider(ui);
+        language_row(ui);
+        widgets::row_divider(ui);
+        telemetry_row(ui, state);
+    });
+    ui.add_space(8.0);
+    let line = device_line(w);
+    feedback_row(ui, state, bundle.map(|p| p.as_path()), snap, &line);
+}
+
+fn language_row(ui: &mut egui::Ui) {
+    widgets::settings_row(ui, t().language, |ui| {
+        if let Some(pref) = widgets::language_menu(ui) {
+            deviceout_i18n::set_preference(pref);
+            theme::install_fonts(ui.ctx(), deviceout_i18n::current().script());
+        }
+    });
+}
+
+fn telemetry_row(ui: &mut egui::Ui, state: &mut EditorUi) {
+    let mut on = state.telemetry_opt_in;
+    let mut changed = false;
+    widgets::settings_row(ui, t().usage_stats, |ui| {
+        changed = widgets::switch(ui, &mut on).changed();
+    });
+    if changed {
+        state.telemetry_opt_in = on;
+        deviceout_update::telemetry::set_enabled(on);
+    }
+}
+
+fn device_line(w: &Wiring) -> String {
+    let id = w.params.device_id.read().clone();
+    w.devices
+        .read()
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| format!("{} | {}", d.name, d.mix_format))
+        .unwrap_or_else(|| if id.is_empty() { "none".into() } else { id })
 }
 
 fn note(state: &mut EditorUi, text: String, color: egui::Color32) {
@@ -466,22 +587,24 @@ fn target_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
         note(state, text, theme::AMBER);
     }
 
-    widgets::section_heading(ui, t().heading_target_latency, None);
-    ui.add_space(8.0);
-    let picked = widgets::number_combo(
-        ui,
-        "target_ms",
-        widgets::NumberCombo {
-            value: w.engine.target_ms(),
-            floor,
-            ceiling: MAX_TARGET_MS,
-            steps: TARGET_MS_STEPS,
-            unit: MS,
-            blocked: t().step_unavailable,
-            scrub: true,
-        },
-        &mut state.target_drag,
-    );
+    let mut picked = None;
+    widgets::settings_row(ui, t().heading_target_latency, |ui| {
+        picked = widgets::number_combo(
+            ui,
+            "target_ms",
+            widgets::NumberCombo {
+                width: COMBO_WIDTH,
+                value: w.engine.target_ms(),
+                floor,
+                ceiling: MAX_TARGET_MS,
+                steps: TARGET_MS_STEPS,
+                unit: MS,
+                blocked: t().step_unavailable,
+                scrub: true,
+            },
+            &mut state.target_drag,
+        );
+    });
     if let Some(wanted) = picked {
         let applied = w.engine.request_target_ms(wanted);
         *w.params.target_ms.write() = applied;
@@ -499,22 +622,24 @@ fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&
         .map(|&n| queue_ms(n, period_ms))
         .collect();
 
-    widgets::section_heading(ui, t().heading_device_buffer, None);
-    ui.add_space(8.0);
-    let picked = widgets::number_combo(
-        ui,
-        "queue_ms",
-        widgets::NumberCombo {
-            value: queue_ms(w.engine.queue_periods(), period_ms),
-            floor: 0,
-            ceiling: u32::MAX,
-            steps: &steps,
-            unit: MS,
-            blocked: t().step_unavailable,
-            scrub: false,
-        },
-        &mut state.queue_drag,
-    );
+    let mut picked = None;
+    widgets::settings_row(ui, t().heading_device_buffer, |ui| {
+        picked = widgets::number_combo(
+            ui,
+            "queue_ms",
+            widgets::NumberCombo {
+                width: COMBO_WIDTH,
+                value: queue_ms(w.engine.queue_periods(), period_ms),
+                floor: 0,
+                ceiling: u32::MAX,
+                steps: &steps,
+                unit: MS,
+                blocked: t().step_unavailable,
+                scrub: false,
+            },
+            &mut state.queue_drag,
+        );
+    });
     if let Some(ms) = picked {
         let periods = (f64::from(ms) / period_ms).round() as u32;
         *w.params.queue_periods.write() = w.engine.request_queue_periods(periods);
@@ -531,9 +656,11 @@ fn exclusive_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Opti
     }
 
     let mut on = running.unwrap_or(wanted);
-    widgets::section_heading(ui, t().heading_exclusive, None);
-    ui.add_space(6.0);
-    if widgets::switch(ui, &mut on).changed() {
+    let mut changed = false;
+    widgets::settings_row(ui, t().heading_exclusive, |ui| {
+        changed = widgets::switch(ui, &mut on).changed();
+    });
+    if changed {
         w.engine.request_exclusive(on);
         *w.params.exclusive.write() = on;
     }
@@ -566,35 +693,15 @@ fn mix_format_text(fmt: &StreamFormat) -> String {
     )
 }
 
-fn idle_card(ui: &mut egui::Ui) {
-    theme::card_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.vertical_centered(|ui| {
-            ui.add_space(16.0);
-            ui.label(
-                egui::RichText::new(t().engine_idle)
-                    .size(13.0)
-                    .color(theme::TEXT_DIM),
-            );
-            ui.add_space(16.0);
-        });
-    });
-}
-
-fn footer_card(
-    ui: &mut egui::Ui,
-    state: &mut EditorUi,
-    bundle: Option<&PathBuf>,
-    snap: Option<&UiState>,
-    device_line: &str,
-) {
-    poll_prompt(state);
-    poll_send(state);
-    theme::card_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        update_row(ui, state, bundle);
-        ui.add_space(8.0);
-        feedback_row(ui, state, bundle.map(|p| p.as_path()), snap, device_line);
+fn idle_section(ui: &mut egui::Ui) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(t().engine_idle)
+                .size(13.0)
+                .color(theme::TEXT_DIM),
+        );
+        ui.add_space(12.0);
     });
 }
 
@@ -650,6 +757,7 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
 
     let tooltip_width = ui.available_width();
     ui.horizontal(|ui| {
+        ui.set_min_height(44.0);
         ui.spacing_mut().item_spacing.x = 8.0;
         let checking = state.check_busy_since.is_some();
         let action = if checking {
@@ -816,21 +924,6 @@ fn feedback_row(
                 open_feedback(state, FeedbackKind::Feature, bundle, snap, device_line);
             }
         });
-    });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        if widgets::switch(ui, &mut state.telemetry_opt_in).changed() {
-            deviceout_update::telemetry::set_enabled(state.telemetry_opt_in);
-        }
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(t().usage_stats)
-                    .size(10.5)
-                    .color(theme::TEXT_FAINT),
-            )
-            .truncate(),
-        );
     });
 }
 

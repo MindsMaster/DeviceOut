@@ -90,7 +90,9 @@ impl DeviceCardHarness {
             egui::CentralPanel::default()
                 .frame(theme::root_frame())
                 .show(ctx, |ui| {
-                    device_card(ui, &self.wiring, self.snapshot.as_ref());
+                    theme::card_frame().show(ui, |ui| {
+                        device_section(ui, &self.wiring, self.snapshot.as_ref());
+                    });
                     card_rect = ui.min_rect();
                 });
         });
@@ -99,6 +101,136 @@ impl DeviceCardHarness {
             collect_text(clipped.shape, &mut text);
         }
         (card_rect, text)
+    }
+}
+
+fn running_snapshot() -> UiState {
+    UiState {
+        state: deviceout_engine::EngineState::Running,
+        error: None,
+        fill_fraction: 0.47,
+        target_fraction: 0.5,
+        capacity_frames: 8_192,
+        target_frames: 4_096.0,
+        min_target_frames: 1_216,
+        exclusive: false,
+        drift_ppm: Some(-1.77),
+        raw_drift_ppm: -1.77,
+        underruns: 3,
+        overruns: 1,
+        dropout_seconds: 0.4,
+        clamp_events: 2,
+        sink_rate_hz: 48_000.0,
+        period_frames: 480,
+        latency_ms: 50.0,
+        device_starvations: 5,
+        reconnects: 1,
+        frames_discarded: 960,
+    }
+}
+
+fn render_body(snapshot: Option<UiState>, tab: usize) -> f32 {
+    let ctx = egui::Context::default();
+    theme::install(&ctx);
+    let params = Arc::new(DeviceOutParams::default());
+    *params.device_id.write() = "test-device".into();
+    let wiring = Wiring {
+        params,
+        engine: Arc::new(EngineController::default()),
+        devices: Arc::new(RwLock::new(vec![DeviceInfo {
+            id: "test-device".into(),
+            name: "CABLE Input (VB-Audio Virtual Cable)".into(),
+            is_default: false,
+            mix_format: StreamFormat {
+                sample_rate: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::F32,
+            },
+        }])),
+    };
+    let mut state = EditorUi {
+        tab,
+        ..EditorUi::default()
+    };
+    let mut height = 0.0;
+    for step in 1..=2 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(crate::EDITOR_WIDTH as f32, crate::EDITOR_HEIGHT as f32),
+            )),
+            time: Some(f64::from(step) * 0.1),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(theme::root_frame())
+                .show(ctx, |ui| {
+                    state.tab = tab;
+                    let top = ui.cursor().top();
+                    body(ui, &mut state, &wiring, None, snapshot.as_ref());
+                    height = ui.cursor().top() - top;
+                });
+        });
+    }
+    height
+}
+
+#[test]
+fn every_tab_fits_the_plugin_window() {
+    let budget = crate::EDITOR_HEIGHT as f32 - 32.0;
+    for tab in 0..3 {
+        for snapshot in [None, Some(running_snapshot()), Some(failed_snapshot())] {
+            let height = render_body(snapshot, tab);
+            assert!(
+                height <= budget,
+                "tab {tab} needs {height} of {budget} available"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_settings_row_keeps_one_line_in_every_language() {
+    let ctx = egui::Context::default();
+    theme::install(&ctx);
+    for lang in deviceout_i18n::Lang::ALL {
+        let strings = lang.strings();
+        for label in [
+            strings.heading_target_latency,
+            strings.heading_device_buffer,
+            strings.heading_exclusive,
+            strings.usage_stats,
+            strings.language,
+        ] {
+            let mut height = 0.0;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(crate::EDITOR_WIDTH as f32, crate::EDITOR_HEIGHT as f32),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default()
+                    .frame(theme::root_frame())
+                    .show(ctx, |ui| {
+                        theme::card_frame().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            widgets::settings_row(ui, label, |ui| {
+                                let mut on = false;
+                                widgets::switch(ui, &mut on);
+                            });
+                            height = ui.min_rect().height();
+                        });
+                    });
+            });
+            assert!(
+                height <= 48.0,
+                "{} row for {label:?} grew to {height}",
+                lang.tag()
+            );
+        }
     }
 }
 
