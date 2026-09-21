@@ -235,6 +235,45 @@ a:hover {
     border: 1px solid rgba(52, 211, 153, .3)
 }
 
+.pill.done {
+    color: #4ade80;
+    background: rgba(74, 222, 128, .1);
+    border: 1px solid rgba(74, 222, 128, .3)
+}
+
+.pill.todo {
+    color: var(--muted);
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid var(--border)
+}
+
+tbody tr.done {
+    opacity: .55
+}
+
+.actions {
+    display: inline-flex;
+    gap: 6px;
+    white-space: nowrap
+}
+
+.okbtn {
+    color: #4ade80;
+    background: rgba(74, 222, 128, .06);
+    border: 1px solid rgba(74, 222, 128, .35);
+    border-radius: 8px;
+    padding: 3px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease
+}
+
+.okbtn:hover {
+    background: rgba(74, 222, 128, .16);
+    border-color: rgba(74, 222, 128, .6)
+}
+
 .muted {
     color: var(--muted)
 }

@@ -102,10 +102,12 @@ fn route(
     maintain(cfg, state, index);
     let path = normalize_path(&req.target);
     let delete_path = format!("/{}/delete", cfg.admin_path);
+    let handle_path = format!("/{}/handle", cfg.admin_path);
     let response = match req.method {
         Method::Get | Method::Head => admin::handle_get(req, &path, cfg, state, index),
         Method::Post if path == "/ping" => api::handle_ping(req, cfg, state, index),
         Method::Post if path == delete_path => admin::handle_admin_delete(req, cfg, state),
+        Method::Post if path == handle_path => admin::handle_admin_handle(req, cfg, state),
         Method::Post => api::handle_post(req, cfg, state),
         Method::Other => text(405, "method"),
     };
@@ -235,6 +237,66 @@ mod tests {
         let reply = post_ping(addr, "tok");
         assert!(reply.starts_with("HTTP/1.1 429 "), "{reply}");
         assert!(reply.contains("Retry-After: 300\r\n"), "{reply}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn post_ticket(addr: SocketAddr, message: &str) -> String {
+        let body = format!(
+            r#"{{"feedback_id":"abc","message":"{message}","kind":"bug","version":"1.1.1"}}"#
+        );
+        let reply = talk(
+            addr,
+            &format!(
+                "POST /report HTTP/1.1\r\nHost: a\r\nX-DeviceOut-Token: tok\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(reply.split("\r\n\r\n").nth(1).unwrap_or_default())
+                .unwrap_or_else(|e| panic!("{e}: {reply}"));
+        json["ticket"].as_str().unwrap().to_string()
+    }
+
+    fn mark_handled(addr: SocketAddr, ticket: &str, handled: bool) -> String {
+        let body = format!("ticket={ticket}&handled={}", u8::from(handled));
+        talk(
+            addr,
+            &format!(
+                "POST /deviceout-feedback/{ADMIN}/handle HTTP/1.1\r\nHost: a\r\nAuthorization: Basic {}\r\nContent-Length: {}\r\n\r\n{body}",
+                b64("admin:pw"),
+                body.len()
+            ),
+        )
+    }
+
+    #[test]
+    fn handled_tickets_are_flagged_and_sink_to_the_bottom() {
+        let dir = temp("route-handled");
+        let addr = start(&dir, 100);
+        let first = post_ticket(addr, "older");
+        let second = post_ticket(addr, "newer");
+
+        let rows = dashboard(addr, "")["rows"].clone();
+        assert_eq!(rows[0]["ticket"], second);
+        assert_eq!(rows[0]["handled"], false);
+
+        let reply = mark_handled(addr, &second, true);
+        assert!(reply.starts_with("HTTP/1.1 303 "), "{reply}");
+        let rows = dashboard(addr, "")["rows"].clone();
+        assert_eq!(rows[0]["ticket"], first);
+        assert_eq!(rows[1]["ticket"], second);
+        assert_eq!(rows[1]["handled"], true);
+
+        assert!(mark_handled(addr, &second, false).starts_with("HTTP/1.1 303 "));
+        assert_eq!(dashboard(addr, "")["rows"][0]["ticket"], second);
+
+        let reply = talk(
+            addr,
+            &format!(
+                "POST /deviceout-feedback/{ADMIN}/handle HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n"
+            ),
+        );
+        assert!(reply.starts_with("HTTP/1.1 401 "), "{reply}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

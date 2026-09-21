@@ -45,6 +45,8 @@ pub struct Stored {
     pub kind: String,
     #[serde(default)]
     pub version: String,
+    #[serde(default)]
+    pub handled_at: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +142,7 @@ pub fn forward(dir: &Path, payload: &Payload, ticket: &str, ip: &str) -> bool {
         "diag": payload.diag,
         "kind": payload.kind,
         "version": payload.version,
+        "handled_at": serde_json::Value::Null,
     });
     let Ok(bytes) = serde_json::to_vec_pretty(&record) else {
         return false;
@@ -161,6 +164,28 @@ pub fn forward(dir: &Path, payload: &Payload, ticket: &str, ip: &str) -> bool {
         payload.feedback_id, payload.kind
     );
     true
+}
+
+pub fn set_handled(dir: &Path, ticket: &str, handled: bool, now: u64) -> std::io::Result<bool> {
+    let path = dir.join(format!("{ticket}.json"));
+    let Ok(bytes) = std::fs::read(&path) else {
+        return Ok(false);
+    };
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Ok(false);
+    };
+    let Some(map) = value.as_object_mut() else {
+        return Ok(false);
+    };
+    let stamp = if handled {
+        serde_json::json!(now)
+    } else {
+        serde_json::Value::Null
+    };
+    map.insert("handled_at".into(), stamp);
+    let out = serde_json::to_vec_pretty(&value).map_err(std::io::Error::other)?;
+    write_replace(&path, &out)?;
+    Ok(true)
 }
 
 pub fn write_replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -254,6 +279,34 @@ mod tests {
             let b = u128::from_str_radix(&pair[1][3..], 16).unwrap();
             assert!(b > a, "{} then {}", pair[0], pair[1]);
         }
+    }
+
+    #[test]
+    fn handling_a_ticket_is_reversible_and_keeps_the_rest() {
+        let dir = std::env::temp_dir().join(format!("fb-handled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let payload = Payload {
+            feedback_id: "abc".into(),
+            message: "hello".into(),
+            contact: Some("me@example.com".into()),
+            diag: "diag".into(),
+            kind: "feature".into(),
+            version: "1.1.1".into(),
+        };
+        assert!(forward(&dir, &payload, "DO-1", "1.1.1.1"));
+        assert!(load_ticket(&dir, "DO-1").unwrap().handled_at.is_none());
+
+        assert!(set_handled(&dir, "DO-1", true, 1_700).unwrap());
+        let item = load_ticket(&dir, "DO-1").unwrap();
+        assert_eq!(item.handled_at, Some(1_700));
+        assert_eq!(item.message, "hello");
+        assert_eq!(item.kind, "feature");
+        assert_eq!(item.contact.as_deref(), Some("me@example.com"));
+
+        assert!(set_handled(&dir, "DO-1", false, 1_800).unwrap());
+        assert!(load_ticket(&dir, "DO-1").unwrap().handled_at.is_none());
+        assert!(!set_handled(&dir, "DO-missing", true, 1_900).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

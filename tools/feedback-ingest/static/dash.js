@@ -33,20 +33,37 @@ function renderRows(rows) {
   var body = document.getElementById('ticket-body');
   if (!body) return;
   if (!rows || !rows.length) {
-    body.innerHTML = '<tr><td colspan="8" class="empty">无</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="empty">无</td></tr>';
     return;
   }
   body.innerHTML = rows.map(function (r) {
     var ver = r.version ? esc(r.version) : '-';
     var contact = r.contact ? esc(r.contact) : '-';
-    return '<tr><td class="mono"><a href="' + esc(PREFIX) + '/' + esc(r.ticket) + '">' + esc(r.ticket) + '</a></td>' +
-      '<td>' + pill(r.kind) + '</td><td class="muted">' + ver + '</td>' +
+    return '<tr' + (r.handled ? ' class="done"' : '') + '><td class="mono"><a href="' + esc(PREFIX) + '/' + esc(r.ticket) + '">' + esc(r.ticket) + '</a></td>' +
+      '<td>' + status(r.handled) + '</td><td>' + pill(r.kind) + '</td><td class="muted">' + ver + '</td>' +
       '<td class="muted">' + esc(fmtTs(r.ts)) + '</td><td class="mono">' + esc(r.ip) + '</td>' +
       '<td>' + contact + '</td><td><span class="excerpt" title="' + esc(r.message) + '">' + esc(r.preview) + '</span></td>' +
-      '<td><form class="del" method="post" action="' + esc(PREFIX) + '/delete" onsubmit="return confirm(\'删除？\')">' +
-      '<input type="hidden" name="ticket" value="' + esc(r.ticket) + '">' +
-      '<button type="submit" class="delbtn">删除</button></form></td></tr>';
+      '<td class="actions">' + handleForm(r) + delForm(r) + '</td></tr>';
   }).join('');
+}
+
+function status(handled) {
+  return handled
+    ? '<span class="pill done">已处理</span>'
+    : '<span class="pill todo">待处理</span>';
+}
+
+function handleForm(r) {
+  return '<form class="del" method="post" action="' + esc(PREFIX) + '/handle">' +
+    '<input type="hidden" name="ticket" value="' + esc(r.ticket) + '">' +
+    '<input type="hidden" name="handled" value="' + (r.handled ? '0' : '1') + '">' +
+    '<button type="submit" class="okbtn">' + (r.handled ? '撤销' : '处理') + '</button></form>';
+}
+
+function delForm(r) {
+  return '<form class="del" method="post" action="' + esc(PREFIX) + '/delete" onsubmit="return confirm(\'删除？\')">' +
+    '<input type="hidden" name="ticket" value="' + esc(r.ticket) + '">' +
+    '<button type="submit" class="delbtn">删除</button></form>';
 }
 
 function setCohort(d) {

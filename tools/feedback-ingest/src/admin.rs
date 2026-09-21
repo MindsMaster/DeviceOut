@@ -7,7 +7,9 @@ use crate::config::{Config, Hit, Limits};
 use crate::http::{Request, Response};
 use crate::index::Index;
 use crate::stats::{compute_stats, pairs_json, Window};
-use crate::store::{list_tickets, load_ticket, safe_ticket, ticket_ms, valid_ticket_id, Stored};
+use crate::store::{
+    list_tickets, load_ticket, safe_ticket, set_handled, ticket_ms, valid_ticket_id, Stored,
+};
 use crate::util::{
     b64, client_ip, ct_eq, esc, header_value, html, json_ok, now_epoch, over_limit, parse_offset,
     prune, query_of, query_param, text, Resp,
@@ -96,6 +98,40 @@ enum Auth {
     Wrong,
 }
 
+pub fn handle_admin_handle(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+    if let Some(resp) = admin_gate(req, cfg, state) {
+        return resp;
+    }
+    if req.body.len() > DELETE_MAX_BODY {
+        return text(413, "too large");
+    }
+    let body = String::from_utf8_lossy(&req.body);
+    let ticket = form_field(&body, "ticket");
+    if !valid_ticket_id(ticket) {
+        return text(404, "not found");
+    }
+    let handled = form_field(&body, "handled") == "1";
+    let prefix = format!("/deviceout-feedback/{}", cfg.admin_path);
+    match set_handled(&cfg.dir, ticket, handled, now_epoch()) {
+        Ok(true) => {
+            eprintln!("ticket {ticket} handled={handled}");
+            Response::empty(303).header("Location", &format!("{prefix}/"))
+        }
+        Ok(false) => text(404, "not found"),
+        Err(e) => {
+            eprintln!("handle ticket {ticket} error: {e}");
+            text(500, "store")
+        }
+    }
+}
+
+fn form_field<'a>(body: &'a str, key: &str) -> &'a str {
+    body.split('&')
+        .find_map(|p| p.strip_prefix(&format!("{key}=")))
+        .unwrap_or("")
+        .trim()
+}
+
 pub fn handle_admin_delete(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
     if let Some(resp) = admin_gate(req, cfg, state) {
         return resp;
@@ -105,11 +141,7 @@ pub fn handle_admin_delete(req: &Request, cfg: &Config, state: &Mutex<Limits>) -
         return text(413, "too large");
     }
     let body = String::from_utf8_lossy(&req.body);
-    let ticket = body
-        .split('&')
-        .find_map(|p| p.strip_prefix("ticket="))
-        .unwrap_or("")
-        .trim();
+    let ticket = form_field(&body, "ticket");
     if !valid_ticket_id(ticket) {
         return text(404, "not found");
     }
@@ -151,6 +183,27 @@ fn kind_pill(kind: &str) -> String {
     format!("<span class=\"pill {cls}\">{}</span>", kind_label(kind))
 }
 
+fn status_pill(handled: bool) -> &'static str {
+    if handled {
+        "<span class=\"pill done\">已处理</span>"
+    } else {
+        "<span class=\"pill todo\">待处理</span>"
+    }
+}
+
+fn handle_form(prefix: &str, ticket: &str, handled: bool) -> String {
+    format!(
+        "<form class=\"del\" method=\"post\" action=\"{}/handle\">\
+         <input type=\"hidden\" name=\"ticket\" value=\"{}\">\
+         <input type=\"hidden\" name=\"handled\" value=\"{}\">\
+         <button type=\"submit\" class=\"okbtn\">{}</button></form>",
+        esc(prefix),
+        esc(ticket),
+        if handled { "0" } else { "1" },
+        if handled { "撤销" } else { "处理" },
+    )
+}
+
 fn delete_form(prefix: &str, ticket: &str) -> String {
     format!(
         "<form class=\"del\" method=\"post\" action=\"{}/delete\" \
@@ -163,11 +216,18 @@ fn delete_form(prefix: &str, ticket: &str) -> String {
 }
 
 fn ticket_rows(dir: &Path) -> Vec<serde_json::Value> {
-    let mut files = list_tickets(dir);
-    files.sort_by(|a, b| b.cmp(a));
-    files
+    let mut items: Vec<Stored> = list_tickets(dir)
         .into_iter()
         .filter_map(|name| load_ticket(dir, &name))
+        .collect();
+    items.sort_by(|a, b| {
+        a.handled_at
+            .is_some()
+            .cmp(&b.handled_at.is_some())
+            .then_with(|| ticket_ms(&b.ticket).cmp(&ticket_ms(&a.ticket)))
+    });
+    items
+        .into_iter()
         .map(|item| {
             let preview: String = item.message.chars().take(80).collect();
             serde_json::json!({
@@ -179,6 +239,7 @@ fn ticket_rows(dir: &Path) -> Vec<serde_json::Value> {
                 "contact": item.contact.unwrap_or_default(),
                 "message": item.message,
                 "preview": preview,
+                "handled": item.handled_at.is_some(),
             })
         })
         .collect()
@@ -278,7 +339,7 @@ fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> 
     out.push_str("</section>");
     out.push_str(
         "<section class=\"card wide\"><h2>工单</h2>\
-         <table><thead><tr><th>编号</th><th>类型</th><th>版本</th><th>时间</th><th>IP</th><th>联系</th><th>摘要</th><th></th></tr></thead>\
+         <table><thead><tr><th>编号</th><th>状态</th><th>类型</th><th>版本</th><th>时间</th><th>IP</th><th>联系</th><th>摘要</th><th></th></tr></thead>\
          <tbody id=\"ticket-body\"></tbody></table></section></div>",
     );
     out.push_str("<script>const PREFIX = ");
@@ -319,7 +380,8 @@ fn admin_detail(item: &Stored, prefix: &str) -> String {
         esc(prefix)
     ));
     out.push_str(&format!(
-        "<div class=\"card\"><div class=\"dhead\"><h1 class=\"mono\">{}</h1>{}<span style=\"margin-left:auto\">{}</span></div>\
+        "<div class=\"card\"><div class=\"dhead\"><h1 class=\"mono\">{}</h1>{}{}\
+         <span style=\"margin-left:auto\" class=\"actions\">{}{}</span></div>\
          <div class=\"meta\">\
          <div><div class=\"k\">时间</div><div class=\"v ts\" data-ts=\"{}\">-</div></div>\
          <div><div class=\"k\">IP</div><div class=\"v mono\">{}</div></div>\
@@ -329,6 +391,8 @@ fn admin_detail(item: &Stored, prefix: &str) -> String {
          </div></div>",
         esc(&item.ticket),
         kind_pill(&item.kind),
+        status_pill(item.handled_at.is_some()),
+        handle_form(prefix, &item.ticket, item.handled_at.is_some()),
         delete_form(prefix, &item.ticket),
         ticket_ms(&item.ticket),
         esc(&item.ip),
