@@ -116,7 +116,7 @@ pub(crate) fn create(w: Wiring) -> Option<Box<dyn Editor>> {
                         .max_height(height)
                         .min_scrolled_height(height)
                         .scroll_bar_visibility(
-                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
                         )
                         .show(ui, |ui| {
                             egui::Frame::new()
