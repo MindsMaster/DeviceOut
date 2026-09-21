@@ -12,7 +12,7 @@ use deviceout_i18n::{fill, t, Strings};
 use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
-use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, RING_FRAME_STEPS};
+use crate::{enumerate_devices, DeviceOutParams, EngineController, UiState, TARGET_MS_STEPS};
 
 mod fonts;
 #[cfg(test)]
@@ -67,7 +67,7 @@ struct EditorUi {
     check_mark_attempt: Option<i64>,
     prompt_wait: Option<PromptWait>,
     telemetry_opt_in: bool,
-    ring_drag: Option<u32>,
+    target_drag: Option<u32>,
     send_watch: Option<(String, Instant)>,
     send_note: Option<(Instant, String, egui::Color32)>,
 }
@@ -81,7 +81,7 @@ impl Default for EditorUi {
             check_mark_attempt: None,
             prompt_wait: None,
             telemetry_opt_in: deviceout_update::telemetry::is_enabled(),
-            ring_drag: None,
+            target_drag: None,
             send_watch: None,
             send_note: None,
         }
@@ -187,7 +187,10 @@ fn snapshot(engine: &EngineController) -> Option<UiState> {
         state: m.state(),
         error: m.last_error(),
         fill_fraction: m.fill_fraction(),
+        target_fraction: m.target_fraction(),
         capacity_frames: m.capacity_frames(),
+        target_frames: m.target_frames(),
+        min_target_frames: m.min_target_frames(),
         drift_ppm: m.drift_ppm_settled(),
         raw_drift_ppm: m.drift_ppm(),
         underruns: stats.underrun_events(),
@@ -362,25 +365,25 @@ fn fill_card(ui: &mut egui::Ui, s: &UiState) {
             ),
         );
         ui.add_space(6.0);
-        widgets::progress_bar(ui, s.fill_fraction);
+        widgets::progress_bar(ui, s.fill_fraction, s.target_fraction);
     });
 }
 
-fn ring_step_index(steps: &[u32], frames: u32) -> usize {
+fn target_step_index(steps: &[u32], ms: u32) -> usize {
     steps
         .iter()
         .enumerate()
-        .min_by_key(|(_, step)| step.abs_diff(frames))
+        .min_by_key(|(_, step)| step.abs_diff(ms))
         .map(|(i, _)| i)
         .unwrap_or(0)
 }
 
-fn allowed_ring_steps(floor: u32) -> &'static [u32] {
-    let first = RING_FRAME_STEPS
+fn allowed_target_steps(floor: u32) -> &'static [u32] {
+    let first = TARGET_MS_STEPS
         .iter()
         .position(|&s| s >= floor)
-        .unwrap_or(RING_FRAME_STEPS.len() - 1);
-    &RING_FRAME_STEPS[first..]
+        .unwrap_or(TARGET_MS_STEPS.len() - 1);
+    &TARGET_MS_STEPS[first..]
 }
 
 fn stats_card(ui: &mut egui::Ui, snap: Option<&UiState>) {
@@ -427,32 +430,32 @@ fn size_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
     theme::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
 
-        let steps = allowed_ring_steps(w.engine.ring_floor());
-        let committed = w.engine.ring_frames();
-        let shown = state.ring_drag.unwrap_or(committed);
+        let steps = allowed_target_steps(w.engine.target_floor_ms());
+        let committed = w.engine.target_ms();
+        let shown = state.target_drag.unwrap_or(committed);
         widgets::section_heading(
             ui,
-            t().heading_buffer_size,
+            t().heading_target_latency,
             Some(
-                egui::RichText::new(thousands(u64::from(shown)))
+                egui::RichText::new(format!("{shown} ms"))
                     .font(egui::FontId::monospace(12.0))
                     .color(theme::TEXT),
             ),
         );
         ui.add_space(8.0);
 
-        let mut idx = ring_step_index(steps, shown);
+        let mut idx = target_step_index(steps, shown);
         let slider = widgets::stepped_slider(ui, &mut idx, steps.len());
         let next = steps[idx.min(steps.len() - 1)];
         if slider.dragged() {
-            state.ring_drag = Some(next);
+            state.target_drag = Some(next);
         }
         let commit = slider.drag_stopped() || (slider.clicked() && !slider.dragged());
         if commit {
-            state.ring_drag = None;
+            state.target_drag = None;
             if next != committed {
-                *w.params.ring_frames.write() = next;
-                w.engine.set_ring_frames_async(next);
+                *w.params.target_ms.write() = next;
+                w.engine.set_target_ms_async(next);
             }
         }
     });
@@ -852,7 +855,7 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         .map(|v| format!("{v:.1}"))
         .unwrap_or_else(|| format!("raw {:.1}", s.raw_drift_ppm));
     format!(
-        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\nperiod_frames={}\nsink_hz={:.0}\nengine_error={}",
+        "output_device={device_line}\nengine_state={:?}\nfill={:.1}%\nunderruns={}\noverruns={}\ndevice_starvations={}\ndropout_s={:.2}\nreconnects={}\nframes_discarded={}\nclamp={}\nlatency_ms={:.1}\ndrift_ppm={}\nring_frames={}\ntarget_frames={:.0}\nmin_target_frames={}\nperiod_frames={}\nsink_hz={:.0}\nengine_error={}",
         s.state,
         s.fill_fraction * 100.0,
         s.underruns,
@@ -865,6 +868,8 @@ fn session_diag(snap: Option<&UiState>, device_line: &str) -> String {
         s.latency_ms,
         drift,
         s.capacity_frames,
+        s.target_frames,
+        s.min_target_frames,
         s.period_frames,
         s.sink_rate_hz,
         deviceout_update::sanitize_user_paths(
@@ -905,14 +910,3 @@ fn queue_feedback(
     Ok(item.id)
 }
 
-fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}

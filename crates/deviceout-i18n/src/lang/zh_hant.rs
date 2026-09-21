@@ -15,7 +15,7 @@ pub static STRINGS: Strings = Strings {
     heading_latency: "延遲",
     heading_drift: "漂移",
     heading_format: "格式",
-    heading_buffer_size: "緩衝大小",
+    heading_target_latency: "目標延遲",
     mix_format: "{rate} Hz / {channels} 聲道 / {sample}",
     sample_f32: "32 位元浮點",
     sample_i16: "16 位元整數",

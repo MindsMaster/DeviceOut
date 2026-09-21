@@ -15,7 +15,7 @@ pub static STRINGS: Strings = Strings {
     heading_latency: "레이턴시",
     heading_drift: "드리프트",
     heading_format: "포맷",
-    heading_buffer_size: "버퍼 크기",
+    heading_target_latency: "목표 지연 시간",
     mix_format: "{rate} Hz / {channels}채널 / {sample}",
     sample_f32: "32비트 부동 소수점",
     sample_i16: "16비트 정수",

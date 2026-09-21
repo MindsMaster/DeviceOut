@@ -15,7 +15,7 @@ mod engine_ctl;
 mod heartbeat;
 
 pub(crate) use engine_ctl::{
-    min_ring_frames, EngineController, DEFAULT_RING_FRAMES, RING_FRAME_STEPS,
+    min_target_ms, EngineController, DEFAULT_TARGET_MS, TARGET_MS_STEPS,
 };
 pub(crate) use heartbeat::Heartbeat;
 
@@ -47,8 +47,8 @@ struct DeviceOutParams {
     #[persist = "device-id"]
     device_id: Arc<RwLock<String>>,
 
-    #[persist = "ring-frames"]
-    ring_frames: Arc<RwLock<u32>>,
+    #[persist = "target-ms"]
+    target_ms: Arc<RwLock<u32>>,
 }
 
 impl Default for DeviceOutParams {
@@ -56,7 +56,7 @@ impl Default for DeviceOutParams {
         Self {
             editor_state: EguiState::from_size(EDITOR_WIDTH, EDITOR_HEIGHT),
             device_id: Arc::new(RwLock::new(String::new())),
-            ring_frames: Arc::new(RwLock::new(DEFAULT_RING_FRAMES)),
+            target_ms: Arc::new(RwLock::new(DEFAULT_TARGET_MS)),
         }
     }
 }
@@ -144,9 +144,9 @@ impl Plugin for DeviceOut {
         };
         *self.params.device_id.write() = device_id.clone();
 
-        let floor = min_ring_frames(buffer_config.max_buffer_size, source_rate);
-        let requested = *self.params.ring_frames.read();
-        let frames = self.engine.initialize(
+        let floor = min_target_ms(buffer_config.max_buffer_size, source_rate);
+        let requested = *self.params.target_ms.read();
+        let target_ms = self.engine.initialize(
             EngineConfig {
                 device_id,
                 source_rate_hz: source_rate,
@@ -157,7 +157,7 @@ impl Plugin for DeviceOut {
             requested,
             floor,
         );
-        *self.params.ring_frames.write() = frames;
+        *self.params.target_ms.write() = target_ms;
 
         true
     }
@@ -227,7 +227,10 @@ pub(crate) struct UiState {
     pub state: EngineState,
     pub error: Option<Fault>,
     pub fill_fraction: f64,
+    pub target_fraction: f64,
     pub capacity_frames: u64,
+    pub target_frames: f64,
+    pub min_target_frames: u64,
     pub drift_ppm: Option<f64>,
     pub raw_drift_ppm: f64,
     pub underruns: u64,

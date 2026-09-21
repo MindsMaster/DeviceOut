@@ -229,7 +229,7 @@ pub(crate) fn stepped_slider(ui: &mut egui::Ui, index: &mut usize, steps: usize)
     response
 }
 
-pub(crate) fn progress_bar(ui: &mut egui::Ui, fraction: f64) {
+pub(crate) fn progress_bar(ui: &mut egui::Ui, fraction: f64, target: f64) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 3.0, theme::TRACK);
@@ -240,6 +240,12 @@ pub(crate) fn progress_bar(ui: &mut egui::Ui, fraction: f64) {
             Pos2::new(rect.min.x + rect.width() * fill, rect.max.y),
         );
         painter.rect_filled(filled, 3.0, theme::TEXT);
+    }
+    let mark = target.clamp(0.0, 1.0) as f32;
+    if mark > 0.002 {
+        let x = rect.min.x + rect.width() * mark;
+        let tick = Rect::from_min_max(Pos2::new(x - 1.0, rect.min.y - 2.0), Pos2::new(x + 1.0, rect.max.y + 2.0));
+        painter.rect_filled(tick, 1.0, theme::GREEN);
     }
 }
 

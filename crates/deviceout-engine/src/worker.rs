@@ -66,10 +66,11 @@ pub fn ring_capacity_for_target(target_frames: usize) -> usize {
         .next_power_of_two()
 }
 
-fn target_level(config: &EngineConfig, period_frames: usize, capacity_frames: usize) -> f64 {
+fn target_level(config: &EngineConfig, period_frames: usize, capacity_frames: usize) -> (f64, usize) {
     let ceiling = (capacity_frames / 2).max(1);
     let floor = min_target_frames(config.max_block_frames, period_frames).min(ceiling);
-    frames_for_ms(config.target_ms, config.source_rate_hz).clamp(floor, ceiling) as f64
+    let target = frames_for_ms(config.target_ms, config.source_rate_hz).clamp(floor, ceiling);
+    (target as f64, floor)
 }
 
 pub trait OpenSink: Send + 'static {
@@ -312,7 +313,8 @@ impl<S: AudioSink> Worker<S> {
         let period_frames = sink.period_frames();
         let nominal_ratio = sink_rate / config.source_rate_hz;
         let period_source_frames = ((period_frames as f64 / nominal_ratio).ceil() as usize).max(1);
-        let target_frames = target_level(config, period_source_frames, rx.capacity_frames());
+        let (target_frames, min_target) =
+            target_level(config, period_source_frames, rx.capacity_frames());
 
         let ctrl = DriftController::new(target_frames, sink_rate, nominal_ratio, config.tuning);
         let resampler =
@@ -329,7 +331,7 @@ impl<S: AudioSink> Worker<S> {
             rx.capacity_frames(),
             resampler.output_delay(),
         );
-        metrics.set_target(target_frames, config.tuning.settle_time_s * 3.0);
+        metrics.set_target(target_frames, min_target, config.tuning.settle_time_s * 3.0);
 
         Ok(Self {
             sink,
@@ -464,24 +466,24 @@ mod tests {
 
     #[test]
     fn the_target_follows_the_requested_milliseconds() {
-        assert_eq!(target_level(&cfg(30.0, 128), 480, 16_384), 1_440.0);
-        assert_eq!(target_level(&cfg(50.0, 128), 480, 16_384), 2_400.0);
-        assert_eq!(target_level(&cfg(120.0, 128), 480, 32_768), 5_760.0);
+        assert_eq!(target_level(&cfg(30.0, 128), 480, 16_384).0, 1_440.0);
+        assert_eq!(target_level(&cfg(50.0, 128), 480, 16_384).0, 2_400.0);
+        assert_eq!(target_level(&cfg(120.0, 128), 480, 32_768).0, 5_760.0);
     }
 
     #[test]
     fn the_target_never_dips_below_one_block_plus_two_periods() {
         assert_eq!(min_target_frames(512, 480), 1_472);
-        assert_eq!(target_level(&cfg(30.0, 512), 480, 16_384), 1_472.0);
-        assert_eq!(target_level(&cfg(10.0, 512), 480, 16_384), 1_472.0);
-        assert_eq!(target_level(&cfg(10.0, 128), 480, 16_384), 1_088.0);
-        assert_eq!(target_level(&cfg(1.0, 64), 64, 16_384), 192.0);
+        assert_eq!(target_level(&cfg(30.0, 512), 480, 16_384), (1_472.0, 1_472));
+        assert_eq!(target_level(&cfg(10.0, 512), 480, 16_384), (1_472.0, 1_472));
+        assert_eq!(target_level(&cfg(10.0, 128), 480, 16_384), (1_088.0, 1_088));
+        assert_eq!(target_level(&cfg(1.0, 64), 64, 16_384), (192.0, 192));
     }
 
     #[test]
     fn the_target_never_eats_the_overrun_headroom() {
-        assert_eq!(target_level(&cfg(500.0, 512), 480, 16_384), 8_192.0);
-        assert_eq!(target_level(&cfg(30.0, 65_536), 480, 2_048), 1_024.0);
+        assert_eq!(target_level(&cfg(500.0, 512), 480, 16_384).0, 8_192.0);
+        assert_eq!(target_level(&cfg(30.0, 65_536), 480, 2_048), (1_024.0, 1_024));
     }
 
     #[test]

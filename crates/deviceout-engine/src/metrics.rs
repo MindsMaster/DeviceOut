@@ -52,6 +52,7 @@ pub struct EngineMetrics {
     fill_frames: AtomicU64,
     capacity_frames: AtomicU64,
     target_frames: AtomicU64,
+    min_target_frames: AtomicU64,
     smoothed_fill: AtomicU64,
     drift_ppm: AtomicU64,
     ratio: AtomicU64,
@@ -99,6 +100,7 @@ impl EngineMetrics {
             fill_frames: AtomicU64::new(0),
             capacity_frames: AtomicU64::new(0),
             target_frames: AtomicU64::new(0),
+            min_target_frames: AtomicU64::new(0),
             smoothed_fill: AtomicU64::new(0),
             drift_ppm: AtomicU64::new(0),
             ratio: AtomicU64::new(1.0f64.to_bits()),
@@ -172,8 +174,15 @@ impl EngineMetrics {
             .store(resampler_delay_frames as u64, Ordering::Relaxed);
     }
 
-    pub(crate) fn set_target(&self, target_frames: f64, settled_after_s: f64) {
+    pub(crate) fn set_target(
+        &self,
+        target_frames: f64,
+        min_target_frames: usize,
+        settled_after_s: f64,
+    ) {
         store_f64(&self.target_frames, target_frames);
+        self.min_target_frames
+            .store(min_target_frames as u64, Ordering::Relaxed);
         store_f64(&self.settled_after_s, settled_after_s);
     }
 
@@ -225,6 +234,18 @@ impl EngineMetrics {
 
     pub fn target_frames(&self) -> f64 {
         load_f64(&self.target_frames)
+    }
+
+    pub fn min_target_frames(&self) -> u64 {
+        self.min_target_frames.load(Ordering::Relaxed)
+    }
+
+    pub fn target_fraction(&self) -> f64 {
+        let cap = self.capacity_frames();
+        if cap == 0 {
+            return 0.0;
+        }
+        self.target_frames() / cap as f64
     }
 
     pub fn smoothed_fill(&self) -> f64 {

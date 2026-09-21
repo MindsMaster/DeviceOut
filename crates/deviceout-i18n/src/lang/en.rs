@@ -15,7 +15,7 @@ pub static STRINGS: Strings = Strings {
     heading_latency: "Latency",
     heading_drift: "Drift",
     heading_format: "Format",
-    heading_buffer_size: "Buffer size",
+    heading_target_latency: "Target latency",
     mix_format: "{rate} Hz / {channels} ch / {sample}",
     sample_f32: "32-bit float",
     sample_i16: "16-bit int",
