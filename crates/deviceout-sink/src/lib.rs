@@ -31,6 +31,9 @@ pub trait AudioSink: Send {
     fn queue_limit_frames(&self) -> usize {
         self.buffer_frames()
     }
+    fn min_period_frames(&self) -> usize {
+        0
+    }
     fn prefill_silence(&mut self) -> Result<usize, SinkError>;
     fn exclusive(&self) -> bool {
         false

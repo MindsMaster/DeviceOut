@@ -23,6 +23,7 @@ pub static STRINGS: Strings = Strings {
     heading_exclusive: "Modo exclusivo",
     heading_dropouts: "Cortes",
     heading_period: "Período do dispositivo",
+    heading_min_period: "Período mínimo",
     heading_mode: "Modo",
     heading_version: "Versão",
     mode_shared: "Compartilhado",

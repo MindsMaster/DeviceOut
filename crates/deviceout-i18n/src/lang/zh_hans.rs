@@ -23,6 +23,7 @@ pub static STRINGS: Strings = Strings {
     heading_exclusive: "独占模式",
     heading_dropouts: "断流",
     heading_period: "设备周期",
+    heading_min_period: "最小周期",
     heading_mode: "模式",
     heading_version: "版本",
     mode_shared: "共享",

@@ -122,6 +122,7 @@ fn running_snapshot() -> UiState {
         clamp_events: 2,
         sink_rate_hz: 48_000.0,
         period_frames: 480,
+        min_period_frames: 128,
         latency_ms: 50.0,
         device_starvations: 5,
         reconnects: 1,
@@ -285,6 +286,19 @@ fn a_blocked_step_never_prints_on_top_of_its_value() {
 }
 
 #[test]
+fn the_shortest_period_is_only_reported_when_the_device_names_one() {
+    let mut s = running_snapshot();
+    assert_eq!(min_period_ms(&s), Some(128.0 * 1.0e3 / 48_000.0));
+
+    s.min_period_frames = 0;
+    assert_eq!(min_period_ms(&s), None);
+
+    s.min_period_frames = 128;
+    s.sink_rate_hz = 0.0;
+    assert_eq!(min_period_ms(&s), None);
+}
+
+#[test]
 fn every_tab_fits_the_plugin_window() {
     let budget = crate::EDITOR_HEIGHT as f32 - 32.0;
     for tab in 0..3 {
@@ -367,6 +381,7 @@ fn failed_snapshot() -> UiState {
         clamp_events: 0,
         sink_rate_hz: 48_000.0,
         period_frames: 0,
+        min_period_frames: 0,
         latency_ms: 0.0,
         device_starvations: 0,
         reconnects: 0,

@@ -175,6 +175,7 @@ fn snapshot(engine: &EngineController) -> Option<UiState> {
         clamp_events: m.clamp_events(),
         sink_rate_hz: m.sink_rate_hz(),
         period_frames: m.period_frames(),
+        min_period_frames: m.min_period_frames(),
         latency_ms: m.latency_ms(),
         device_starvations: m.device_starvations(),
         reconnects: m.reconnects(),
@@ -434,6 +435,9 @@ fn stream_section(ui: &mut egui::Ui, s: &UiState) {
             t().heading_period,
             &format!("{:.1} {MS}", device_period_ms(Some(s))),
         );
+        if let Some(ms) = min_period_ms(s) {
+            widgets::kv_row(ui, t().heading_min_period, &format!("{ms:.1} {MS}"));
+        }
         widgets::kv_row(
             ui,
             t().heading_mode,
@@ -664,6 +668,13 @@ fn exclusive_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Opti
         w.engine.request_exclusive(on);
         *w.params.exclusive.write() = on;
     }
+}
+
+fn min_period_ms(s: &UiState) -> Option<f64> {
+    if s.min_period_frames == 0 || s.sink_rate_hz <= 0.0 {
+        return None;
+    }
+    Some(s.min_period_frames as f64 * 1.0e3 / s.sink_rate_hz)
 }
 
 fn device_period_ms(snap: Option<&UiState>) -> f64 {

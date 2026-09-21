@@ -451,6 +451,7 @@ impl<S: AudioSink> Worker<S> {
             channels,
             capacity_frames: rx.capacity_frames(),
             resampler_delay_frames: resampler.output_delay(),
+            min_period_frames: sink.min_period_frames(),
             exclusive: sink.exclusive(),
         });
         metrics.set_target(

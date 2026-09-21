@@ -52,6 +52,7 @@ pub(crate) struct StreamInfo {
     pub channels: usize,
     pub capacity_frames: usize,
     pub resampler_delay_frames: usize,
+    pub min_period_frames: usize,
     pub exclusive: bool,
 }
 
@@ -73,6 +74,7 @@ pub struct EngineMetrics {
     source_rate_hz: AtomicU64,
     sink_rate_hz: AtomicU64,
     period_frames: AtomicU64,
+    min_period_frames: AtomicU64,
     channels: AtomicU64,
     resampler_delay_frames: AtomicU64,
     device_queue_frames: AtomicU64,
@@ -124,6 +126,7 @@ impl EngineMetrics {
             source_rate_hz: AtomicU64::new(0),
             sink_rate_hz: AtomicU64::new(0),
             period_frames: AtomicU64::new(0),
+            min_period_frames: AtomicU64::new(0),
             channels: AtomicU64::new(1),
             resampler_delay_frames: AtomicU64::new(0),
             device_queue_frames: AtomicU64::new(0),
@@ -176,6 +179,8 @@ impl EngineMetrics {
         store_f64(&self.sink_rate_hz, stream.sink_rate_hz);
         self.period_frames
             .store(stream.period_frames as u64, Ordering::Relaxed);
+        self.min_period_frames
+            .store(stream.min_period_frames as u64, Ordering::Relaxed);
         self.channels
             .store(stream.channels as u64, Ordering::Relaxed);
         self.capacity_frames
@@ -341,6 +346,10 @@ impl EngineMetrics {
             self.resampler_delay_frames.load(Ordering::Relaxed) as f64,
             self.sink_rate_hz(),
         )
+    }
+
+    pub fn min_period_frames(&self) -> u64 {
+        self.min_period_frames.load(Ordering::Relaxed)
     }
 
     pub fn period_frames(&self) -> u64 {

@@ -23,6 +23,7 @@ pub static STRINGS: Strings = Strings {
     heading_exclusive: "โหมดเอกสิทธิ์",
     heading_dropouts: "เสียงขาด",
     heading_period: "คาบของอุปกรณ์",
+    heading_min_period: "คาบต่ำสุด",
     heading_mode: "โหมด",
     heading_version: "เวอร์ชัน",
     mode_shared: "แบ่งใช้",

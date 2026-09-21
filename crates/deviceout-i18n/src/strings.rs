@@ -22,6 +22,7 @@ pub struct Strings {
     pub heading_exclusive: &'static str,
     pub heading_dropouts: &'static str,
     pub heading_period: &'static str,
+    pub heading_min_period: &'static str,
     pub heading_mode: &'static str,
     pub heading_version: &'static str,
     pub mode_shared: &'static str,

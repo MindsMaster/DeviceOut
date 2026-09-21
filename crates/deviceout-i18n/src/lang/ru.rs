@@ -23,6 +23,7 @@ pub static STRINGS: Strings = Strings {
     heading_exclusive: "Монопольный режим",
     heading_dropouts: "Обрывы",
     heading_period: "Период устройства",
+    heading_min_period: "Минимальный период",
     heading_mode: "Режим",
     heading_version: "Версия",
     mode_shared: "Общий",

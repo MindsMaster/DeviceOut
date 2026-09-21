@@ -1,8 +1,9 @@
 use std::ptr;
 
+use windows::core::Interface;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
-    IAudioClient, IAudioRenderClient, IMMDevice, AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED,
+    IAudioClient, IAudioClient3, IAudioRenderClient, IMMDevice, AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED,
     AUDCLNT_SHAREMODE, AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_SHAREMODE_SHARED,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, WAVEFORMATEX,
 };
@@ -85,6 +86,7 @@ pub struct WasapiSink {
     format: StreamFormat,
     buffer_frames: u32,
     period_frames: usize,
+    min_period_frames: usize,
     queue_limit: usize,
     exclusive: bool,
     running: bool,
@@ -100,7 +102,31 @@ struct Stream {
     format: StreamFormat,
     buffer_frames: u32,
     period_frames: usize,
+    min_period_frames: usize,
     exclusive: bool,
+}
+
+unsafe fn shared_min_period_frames(client: &IAudioClient, wfx: *const WAVEFORMATEX) -> usize {
+    let Ok(client) = client.cast::<IAudioClient3>() else {
+        return 0;
+    };
+    let mut default_frames = 0u32;
+    let mut fundamental = 0u32;
+    let mut min_frames = 0u32;
+    let mut max_frames = 0u32;
+    let query = unsafe {
+        client.GetSharedModeEnginePeriod(
+            wfx,
+            &mut default_frames,
+            &mut fundamental,
+            &mut min_frames,
+            &mut max_frames,
+        )
+    };
+    if query.is_err() {
+        return 0;
+    }
+    min_frames as usize
 }
 
 struct OwnedFormat(Vec<u32>);
@@ -212,6 +238,11 @@ unsafe fn open_stream(
     } else {
         frames_of(default_period, format.sample_rate)
     };
+    let min_period_frames = if exclusive {
+        frames_of(min_period, format.sample_rate)
+    } else {
+        unsafe { shared_min_period_frames(&client, wfx.as_ptr()) }
+    };
 
     let render: IAudioRenderClient = unsafe { client.GetService() }
         .map_err(|e| SinkError::init_from_hresult("获取渲染服务失败", e))?;
@@ -223,6 +254,7 @@ unsafe fn open_stream(
         format,
         buffer_frames,
         period_frames,
+        min_period_frames,
         exclusive,
     })
 }
@@ -256,6 +288,7 @@ impl WasapiSink {
             format: stream.format,
             buffer_frames: stream.buffer_frames,
             period_frames: stream.period_frames,
+            min_period_frames: stream.min_period_frames,
             queue_limit,
             exclusive: stream.exclusive,
             running: false,
@@ -269,6 +302,10 @@ impl WasapiSink {
 
     pub fn queue_limit_frames(&self) -> usize {
         self.queue_limit
+    }
+
+    pub fn min_period_frames(&self) -> usize {
+        self.min_period_frames
     }
 
     fn padding(&self) -> Result<u32, SinkError> {
@@ -303,6 +340,10 @@ impl AudioSink for WasapiSink {
 
     fn queue_limit_frames(&self) -> usize {
         self.queue_limit
+    }
+
+    fn min_period_frames(&self) -> usize {
+        self.min_period_frames
     }
 
     fn exclusive(&self) -> bool {
