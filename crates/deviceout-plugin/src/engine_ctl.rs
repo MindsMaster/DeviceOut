@@ -11,7 +11,7 @@ use deviceout_engine::{
 
 pub(crate) const DEFAULT_TARGET_MS: u32 = 30;
 pub(crate) const MAX_TARGET_MS: u32 = 1_000;
-pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 50, 80, 120, 200];
+pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 40, 50, 60, 80, 120, 200];
 pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[1, 2, 3, 4];
 pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 2;
 const DRIFT_CARRY_SANITY_PPM: f64 = 20_000.0;
@@ -132,7 +132,11 @@ impl EngineController {
     }
 
     fn live_drift_ppm(&self) -> Option<f64> {
-        let ppm = self.metrics()?.drift_ppm();
+        let metrics = self.metrics()?;
+        if !ran_clean(&metrics) {
+            return None;
+        }
+        let ppm = metrics.drift_ppm();
         (ppm.is_finite() && ppm.abs() <= DRIFT_CARRY_SANITY_PPM).then_some(ppm)
     }
 
@@ -140,6 +144,9 @@ impl EngineController {
         let Some(metrics) = self.metrics() else {
             return;
         };
+        if !ran_clean(&metrics) {
+            return;
+        }
         let Some(ppm) = metrics.drift_ppm_settled() else {
             return;
         };
@@ -267,6 +274,11 @@ impl EngineController {
         *self.metrics.write() = Some(Arc::clone(handle.metrics()));
         slot.handle = Some(handle);
     }
+}
+
+fn ran_clean(metrics: &EngineMetrics) -> bool {
+    let stats = metrics.stats();
+    stats.underrun_events() == 0 && stats.overrun_events() == 0 && metrics.device_starvations() == 0
 }
 
 fn carried_drift_ppm(slot: &Slot, device_id: &str) -> Option<f64> {
