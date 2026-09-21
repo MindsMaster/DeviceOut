@@ -424,7 +424,7 @@ fn tuning_card(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option
         ui.add_space(14.0);
         queue_row(ui, state, w, snap);
         ui.add_space(14.0);
-        exclusive_row(ui, w, snap);
+        exclusive_row(ui, state, w, snap);
     });
 }
 
@@ -492,17 +492,21 @@ fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&
     }
 }
 
-fn exclusive_row(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
-    let mut wanted = w.engine.exclusive();
+fn exclusive_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&UiState>) {
+    let running = snap.filter(|s| s.sink_rate_hz > 0.0).map(|s| s.exclusive);
+    let wanted = w.engine.exclusive();
+    if wanted && running == Some(false) {
+        w.engine.clear_exclusive();
+        *w.params.exclusive.write() = false;
+        note(state, t().exclusive_fell_back.into(), theme::AMBER);
+    }
+
+    let mut on = running.unwrap_or(wanted);
     widgets::section_heading(ui, t().heading_exclusive, None);
     ui.add_space(6.0);
-    if widgets::switch(ui, &mut wanted).changed() {
-        *w.params.exclusive.write() = wanted;
-        w.engine.request_exclusive(wanted);
-    }
-    if wanted && snap.is_some_and(|s| !s.exclusive) {
-        ui.add_space(6.0);
-        widgets::alert_line(ui, theme::AMBER, t().exclusive_fell_back);
+    if widgets::switch(ui, &mut on).changed() {
+        w.engine.request_exclusive(on);
+        *w.params.exclusive.write() = on;
     }
 }
 
