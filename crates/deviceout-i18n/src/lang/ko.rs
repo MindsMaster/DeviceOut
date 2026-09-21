@@ -19,7 +19,7 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "장치 큐",
     heading_exclusive: "독점 모드",
     exclusive_fell_back: "독점 모드를 사용할 수 없어 공유 모드로 동작 중",
-    step_unavailable: "호스트 블록이 너무 큼",
+    step_unavailable: "시스템 하한보다 낮음",
     target_floor_hit: "여기서 가능한 최솟값은 {ms} ms입니다",
     mix_format: "{rate} Hz / {channels}채널 / {sample}",
     sample_f32: "32비트 부동 소수점",

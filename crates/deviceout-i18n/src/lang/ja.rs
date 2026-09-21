@@ -19,7 +19,7 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "デバイスキュー",
     heading_exclusive: "排他モード",
     exclusive_fell_back: "排他モードを利用できないため共有モードで動作中",
-    step_unavailable: "ホストのブロックが大きすぎます",
+    step_unavailable: "システムの下限を下回ります",
     target_floor_hit: "ここで使える最小値は {ms} ms です",
     mix_format: "{rate} Hz / {channels} ch / {sample}",
     sample_f32: "32ビット浮動小数点",

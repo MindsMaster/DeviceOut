@@ -19,7 +19,7 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "设备队列",
     heading_exclusive: "独占模式",
     exclusive_fell_back: "独占模式不可用，已回落共享模式",
-    step_unavailable: "宿主块长不允许",
+    step_unavailable: "低于系统下限",
     target_floor_hit: "当前最低可用 {ms} ms",
     mix_format: "{rate} Hz / {channels} 声道 / {sample}",
     sample_f32: "32 位浮点",

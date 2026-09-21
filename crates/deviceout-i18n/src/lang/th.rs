@@ -19,7 +19,7 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "คิวอุปกรณ์",
     heading_exclusive: "โหมดเอกสิทธิ์",
     exclusive_fell_back: "ใช้โหมดเอกสิทธิ์ไม่ได้ กำลังใช้โหมดแบ่งใช้",
-    step_unavailable: "บล็อกของโฮสต์ใหญ่เกินไป",
+    step_unavailable: "ต่ำกว่าขีดจำกัดของระบบ",
     target_floor_hit: "ค่าต่ำสุดที่ใช้ได้คือ {ms} ms",
     mix_format: "{rate} Hz / {channels} แชนเนล / {sample}",
     sample_f32: "ทศนิยมลอยตัว 32 บิต",

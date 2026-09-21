@@ -19,7 +19,7 @@ pub static STRINGS: Strings = Strings {
     heading_device_queue: "File du périphérique",
     heading_exclusive: "Mode exclusif",
     exclusive_fell_back: "Mode exclusif indisponible, mode partagé utilisé",
-    step_unavailable: "bloc de l'hôte trop grand",
+    step_unavailable: "sous le minimum du système",
     target_floor_hit: "{ms} ms est le minimum disponible ici",
     mix_format: "{rate} Hz / {channels} can. / {sample}",
     sample_f32: "flottant 32 bits",
