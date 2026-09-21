@@ -353,8 +353,9 @@ mod tests {
                     continue;
                 }
                 let factor = m[row][col] / m[col][col];
-                for k in col..3 {
-                    m[row][k] -= factor * m[col][k];
+                let base = m[col];
+                for (cell, b) in m[row].iter_mut().zip(base).skip(col) {
+                    *cell -= factor * b;
                 }
                 rhs[row] -= factor * rhs[col];
             }

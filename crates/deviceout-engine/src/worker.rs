@@ -8,7 +8,7 @@ use deviceout_core::{DriftController, DriftResampler, DriftTuning, RingConsumer}
 use deviceout_sink::{AudioSink, SinkError, StreamFormat};
 
 use crate::error::{EngineError, Fault};
-use crate::metrics::{EngineMetrics, EngineState};
+use crate::metrics::{EngineMetrics, EngineState, StreamInfo};
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -348,15 +348,15 @@ impl<S: AudioSink> Worker<S> {
         let pull_buf = vec![0.0f32; resampler.input_frames_max() * channels];
         let out_buf = vec![0.0f32; resampler.output_frames() * channels];
 
-        metrics.set_stream(
-            config.source_rate_hz,
-            sink_rate,
+        metrics.set_stream(StreamInfo {
+            source_rate_hz: config.source_rate_hz,
+            sink_rate_hz: sink_rate,
             period_frames,
             channels,
-            rx.capacity_frames(),
-            resampler.output_delay(),
-            sink.exclusive(),
-        );
+            capacity_frames: rx.capacity_frames(),
+            resampler_delay_frames: resampler.output_delay(),
+            exclusive: sink.exclusive(),
+        });
         metrics.set_target(target_frames, min_target, settle_wait(config));
 
         Ok(Self {

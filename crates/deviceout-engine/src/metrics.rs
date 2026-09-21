@@ -44,6 +44,17 @@ fn load_f64(slot: &AtomicU64) -> f64 {
     f64::from_bits(slot.load(Ordering::Relaxed))
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StreamInfo {
+    pub source_rate_hz: f64,
+    pub sink_rate_hz: f64,
+    pub period_frames: usize,
+    pub channels: usize,
+    pub capacity_frames: usize,
+    pub resampler_delay_frames: usize,
+    pub exclusive: bool,
+}
+
 #[derive(Debug)]
 pub struct EngineMetrics {
     stats: Arc<BridgeStats>,
@@ -156,26 +167,18 @@ impl EngineMetrics {
         self.set_state(EngineState::Failed);
     }
 
-    pub(crate) fn set_stream(
-        &self,
-        source_rate_hz: f64,
-        sink_rate_hz: f64,
-        period_frames: usize,
-        channels: usize,
-        capacity: usize,
-        resampler_delay_frames: usize,
-        exclusive: bool,
-    ) {
-        store_f64(&self.source_rate_hz, source_rate_hz);
-        store_f64(&self.sink_rate_hz, sink_rate_hz);
+    pub(crate) fn set_stream(&self, stream: StreamInfo) {
+        store_f64(&self.source_rate_hz, stream.source_rate_hz);
+        store_f64(&self.sink_rate_hz, stream.sink_rate_hz);
         self.period_frames
-            .store(period_frames as u64, Ordering::Relaxed);
-        self.channels.store(channels as u64, Ordering::Relaxed);
+            .store(stream.period_frames as u64, Ordering::Relaxed);
+        self.channels
+            .store(stream.channels as u64, Ordering::Relaxed);
         self.capacity_frames
-            .store(capacity as u64, Ordering::Relaxed);
+            .store(stream.capacity_frames as u64, Ordering::Relaxed);
         self.resampler_delay_frames
-            .store(resampler_delay_frames as u64, Ordering::Relaxed);
-        self.exclusive.store(exclusive, Ordering::Relaxed);
+            .store(stream.resampler_delay_frames as u64, Ordering::Relaxed);
+        self.exclusive.store(stream.exclusive, Ordering::Relaxed);
     }
 
     pub(crate) fn set_target(
