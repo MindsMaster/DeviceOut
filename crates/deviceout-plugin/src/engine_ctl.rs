@@ -313,20 +313,20 @@ mod tests {
 
     #[test]
     fn the_floor_counts_the_device_queue_and_the_resampler_too() {
-        assert_eq!(min_target_ms(512, 48_000.0, 2), 54);
-        assert_eq!(min_target_ms(2048, 48_000.0, 2), 86);
-        assert_eq!(min_target_ms(128, 44_100.0, 2), 46);
-        assert_eq!(min_target_ms(512, 48_000.0, 4), 74);
-        assert_eq!(min_target_ms(65_536, 48_000.0, 2), 1_409);
+        assert_eq!(min_target_ms(512, 48_000.0, 2), 44);
+        assert_eq!(min_target_ms(2048, 48_000.0, 2), 76);
+        assert_eq!(min_target_ms(128, 44_100.0, 2), 36);
+        assert_eq!(min_target_ms(512, 48_000.0, 4), 64);
+        assert_eq!(min_target_ms(65_536, 48_000.0, 2), 1_399);
     }
 
     #[test]
     fn a_typed_value_is_kept_unless_it_falls_below_the_floor() {
-        assert_eq!(clamp_target_ms(112, 54), 112);
-        assert_eq!(clamp_target_ms(70, 54), 70);
-        assert_eq!(clamp_target_ms(10, 54), 54);
-        assert_eq!(clamp_target_ms(0, 54), 54);
-        assert_eq!(clamp_target_ms(u32::MAX, 54), MAX_TARGET_MS);
+        assert_eq!(clamp_target_ms(112, 44), 112);
+        assert_eq!(clamp_target_ms(70, 44), 70);
+        assert_eq!(clamp_target_ms(10, 44), 44);
+        assert_eq!(clamp_target_ms(0, 44), 44);
+        assert_eq!(clamp_target_ms(u32::MAX, 44), MAX_TARGET_MS);
         assert_eq!(clamp_target_ms(10, 1_409), 1_409);
         assert_eq!(clamp_target_ms(u32::MAX, 1_409), 1_409);
     }

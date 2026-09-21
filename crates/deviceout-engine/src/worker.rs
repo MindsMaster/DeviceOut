@@ -51,7 +51,7 @@ pub const ASSUMED_RESAMPLER_MS: f64 = 3.0;
 
 const CAPACITY_FACTOR: usize = 4;
 const MIN_CAPACITY_FRAMES: usize = 2_048;
-const PERIOD_MARGIN: usize = 2;
+const PERIOD_MARGIN: usize = 1;
 const SETTLE_COLD: f64 = 2.0;
 const SETTLE_CHECK_S: f64 = 2.0;
 const SETTLE_TOL_PPM: f64 = 2.0;
@@ -623,18 +623,18 @@ mod tests {
     #[test]
     fn the_floor_it_reports_is_what_the_user_can_actually_ask_for() {
         let l = level(30.0, 512, 480, 16_384, 20.0);
-        assert_eq!(l.floor, 1_472);
-        assert!((l.total_floor_ms - (1_472.0 * 1.0e3 / 48_000.0 + 20.0)).abs() < 1.0e-9);
+        assert_eq!(l.floor, 992);
+        assert!((l.total_floor_ms - (992.0 * 1.0e3 / 48_000.0 + 20.0)).abs() < 1.0e-9);
     }
 
     #[test]
-    fn the_target_never_dips_below_one_block_plus_two_periods() {
-        assert_eq!(min_target_frames(512, 480), 1_472);
-        assert_eq!(level(30.0, 512, 480, 16_384, 0.0).frames, 1_472.0);
-        assert_eq!(level(10.0, 512, 480, 16_384, 0.0).frames, 1_472.0);
-        assert_eq!(level(10.0, 128, 480, 16_384, 0.0).frames, 1_088.0);
-        assert_eq!(level(1.0, 64, 64, 16_384, 0.0).frames, 192.0);
-        assert_eq!(level(50.0, 512, 480, 16_384, 40.0).frames, 1_472.0);
+    fn the_target_never_dips_below_one_block_plus_a_period() {
+        assert_eq!(min_target_frames(512, 480), 992);
+        assert_eq!(level(30.0, 512, 480, 16_384, 0.0).frames, 1_440.0);
+        assert_eq!(level(10.0, 512, 480, 16_384, 0.0).frames, 992.0);
+        assert_eq!(level(10.0, 128, 480, 16_384, 0.0).frames, 608.0);
+        assert_eq!(level(1.0, 64, 64, 16_384, 0.0).frames, 128.0);
+        assert_eq!(level(50.0, 512, 480, 16_384, 40.0).frames, 992.0);
     }
 
     #[test]
