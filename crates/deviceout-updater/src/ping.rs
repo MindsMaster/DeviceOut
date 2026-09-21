@@ -28,14 +28,21 @@ pub fn run(plugin_version: Option<&str>) {
     };
     let url = format!("{}/ping", paths::BUILTIN_FEEDBACK_URL);
     let agent = crate::http::agent(Duration::from_secs(8));
-    if let Err(e) = agent
+    match agent
         .post(&url)
         .header("Content-Type", "application/json")
         .header("X-DeviceOut-Token", paths::BUILTIN_FEEDBACK_TOKEN)
         .send(&encoded)
     {
-        logutil::log(&format!("ping: {e}"));
+        Ok(mut resp) => telemetry::record_ping_ok(next_interval(&mut resp)),
+        Err(e) => logutil::log(&format!("ping: {e}")),
     }
+}
+
+fn next_interval(resp: &mut ureq::http::Response<ureq::Body>) -> Option<i64> {
+    let text = resp.body_mut().read_to_string().ok()?;
+    let body: serde_json::Value = serde_json::from_str(&text).ok()?;
+    body.get("next").and_then(|v| v.as_i64())
 }
 
 #[cfg(windows)]
