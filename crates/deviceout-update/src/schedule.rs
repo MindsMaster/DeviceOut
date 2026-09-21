@@ -1,6 +1,6 @@
 use crate::State;
 
-pub const CHECK_SUCCESS_INTERVAL_SECS: i64 = 24 * 60 * 60;
+pub const CHECK_SUCCESS_INTERVAL_SECS: i64 = 6 * 60 * 60;
 pub const CHECK_FAILURE_INTERVAL_SECS: i64 = 60 * 60;
 
 pub fn within(last: Option<i64>, now: i64, window_secs: i64) -> bool {
@@ -38,7 +38,7 @@ mod tests {
     }
 
     #[test]
-    fn success_holds_for_a_day() {
+    fn a_success_holds_for_one_interval() {
         let s = state(Some(1_000), Some(1_000));
         assert!(!should_check(&s, 1_000 + CHECK_SUCCESS_INTERVAL_SECS - 1, false));
         assert!(should_check(&s, 1_000 + CHECK_SUCCESS_INTERVAL_SECS, false));

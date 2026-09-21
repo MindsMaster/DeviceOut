@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 
 use deviceout_update::paths;
-use deviceout_update::{schedule, Cmp, Feed, State};
+use deviceout_update::{schedule, Cmp, Feed, PendingManifest, State};
 
 use crate::{logutil, unix_now};
 
@@ -29,7 +29,16 @@ pub fn run(bundle: &Path, force: bool) -> Result<()> {
     let feed_url = paths::BUILTIN_FEED_URL;
     logutil::log(&format!("check: feed {feed_url}"));
 
-    let etag = if force { None } else { state.feed_etag.as_deref() };
+    let current = current_version(bundle);
+    let stale = needs_full_fetch(&state, &current, deviceout_update::pending_ready().as_ref());
+    if stale {
+        logutil::log("check: known update has no installer, ignoring the cached feed");
+    }
+    let etag = if force || stale {
+        None
+    } else {
+        state.feed_etag.as_deref()
+    };
     let (bytes, etag) = match fetch_feed(feed_url, etag)? {
         Fetch::NotModified => {
             finish_ok(&mut state, None);
@@ -53,7 +62,6 @@ pub fn run(bundle: &Path, force: bool) -> Result<()> {
     let feed = deviceout_update::parse_feed(&bytes).map_err(|e| anyhow::anyhow!(e))?;
     state.feed_etag = etag;
 
-    let current = current_version(bundle);
     match deviceout_update::cmp_latest(&feed.version, &current) {
         Cmp::Newer => {}
         Cmp::EqualOrOlder => {
@@ -76,6 +84,16 @@ pub fn run(bundle: &Path, force: bool) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn needs_full_fetch(state: &State, current: &str, pending: Option<&PendingManifest>) -> bool {
+    let Some(latest) = state.last_latest.as_deref() else {
+        return false;
+    };
+    if !matches!(deviceout_update::cmp_latest(latest, current), Cmp::Newer) {
+        return false;
+    }
+    !pending.is_some_and(|p| p.version == latest)
 }
 
 fn finish_ok(state: &mut State, latest: Option<&str>) {
@@ -162,4 +180,44 @@ fn download_pending(feed: &Feed, bundle: &Path) -> Result<()> {
     };
     deviceout_update::write_manifest(&manifest)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(latest: &str) -> State {
+        State {
+            last_latest: Some(latest.into()),
+            feed_etag: Some("\"abc\"".into()),
+            ..State::default()
+        }
+    }
+
+    fn pending(version: &str) -> PendingManifest {
+        PendingManifest {
+            version: version.into(),
+            sha256: "a".repeat(64),
+            bundle_path: "C:\\DeviceOut.vst3".into(),
+        }
+    }
+
+    #[test]
+    fn a_ready_installer_lets_the_cached_feed_stand() {
+        assert!(!needs_full_fetch(&state("1.1.2"), "1.1.1", Some(&pending("1.1.2"))));
+    }
+
+    #[test]
+    fn a_missing_installer_forces_a_full_fetch() {
+        assert!(needs_full_fetch(&state("1.1.2"), "1.1.1", None));
+        assert!(needs_full_fetch(&state("1.1.2"), "1.1.1", Some(&pending("1.1.0"))));
+    }
+
+    #[test]
+    fn nothing_to_install_means_nothing_to_refetch() {
+        assert!(!needs_full_fetch(&State::default(), "1.1.1", None));
+        assert!(!needs_full_fetch(&state("1.1.1"), "1.1.1", None));
+        assert!(!needs_full_fetch(&state("1.0.0"), "1.1.1", None));
+        assert!(!needs_full_fetch(&state("nonsense"), "1.1.1", None));
+    }
 }
