@@ -1,11 +1,28 @@
 use nih_plug_egui::egui::{
-    self, Color32, FontId, Pos2, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Vec2,
+    self, Color32, CornerRadius, FontId, Pos2, Rect, Response, RichText, Sense, Shape, Stroke,
+    StrokeKind, Vec2,
 };
 
 use deviceout_engine::EngineState;
 use deviceout_i18n::Lang;
 
 use super::theme;
+
+fn ease(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    egui::lerp(egui::Rgba::from(a)..=egui::Rgba::from(b), t).into()
+}
+
+fn hover_amount(ui: &egui::Ui, response: &Response) -> f32 {
+    let lit = response.hovered() && ui.is_enabled();
+    ease(
+        ui.ctx()
+            .animate_bool_with_time(response.id.with("lit"), lit, 0.12),
+    )
+}
 
 pub(crate) fn heading_text(ui: &mut egui::Ui, title: &str) {
     ui.label(
@@ -46,23 +63,30 @@ fn styled_button(ui: &mut egui::Ui, label: &str, spec: ButtonSpec, stretch: bool
     } else {
         natural.min(ui.available_width().max(48.0))
     };
-    let size = Vec2::new(width, 30.0);
+    let size = Vec2::new(width, 32.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
     let enabled = ui.is_enabled();
-    let hovered = enabled && response.hovered();
+    let lit = hover_amount(ui, &response);
+    let held = enabled && response.is_pointer_button_down_on();
     let fade = |c: Color32| c.gamma_multiply(0.45);
-    let fill = match (enabled, hovered) {
-        (false, _) => fade(spec.fill),
-        (true, true) => spec.hover_fill,
-        (true, false) => spec.fill,
+    let fill = if enabled {
+        let blended = mix(spec.fill, spec.hover_fill, lit);
+        if held {
+            blended.gamma_multiply(0.86)
+        } else {
+            blended
+        }
+    } else {
+        fade(spec.fill)
     };
-    let text_color = match (enabled, hovered) {
-        (false, _) => fade(spec.text),
-        (true, true) => spec.hover_text,
-        (true, false) => spec.text,
+    let text_color = if enabled {
+        mix(spec.text, spec.hover_text, lit)
+    } else {
+        fade(spec.text)
     };
 
+    let rect = if held { rect.shrink(0.5) } else { rect };
     let painter = ui.painter();
     if fill != Color32::TRANSPARENT {
         painter.rect_filled(rect, theme::CORNER_BUTTON, fill);
@@ -126,37 +150,47 @@ fn outline_button_sized(ui: &mut egui::Ui, label: &str, stretch: bool) -> Respon
 }
 
 pub(crate) fn switch(ui: &mut egui::Ui, on: &mut bool) -> Response {
-    let size = Vec2::new(30.0, 16.0);
-    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(42.0, 24.0), Sense::click());
     if response.clicked() {
         *on = !*on;
         response.mark_changed();
     }
 
-    let track_off = Color32::from_rgb(0x27, 0x27, 0x2a);
-    let knob_off = Color32::from_rgb(0xa1, 0xa1, 0xaa);
-    let track_on = Color32::from_rgb(0xfa, 0xfa, 0xfa);
-    let knob_on = Color32::from_rgb(0x09, 0x09, 0x0b);
-
-    let t = ui.ctx().animate_bool_with_time(response.id, *on, 0.15);
-    let lerp = |a: Color32, b: Color32| -> Color32 {
-        egui::lerp(egui::Rgba::from(a)..=egui::Rgba::from(b), t).into()
-    };
-    let mut track = lerp(track_off, track_on);
-    let knob = lerp(knob_off, knob_on);
-    if response.hovered() {
-        track = track.gamma_multiply(1.2);
-    }
+    let t = ease(ui.ctx().animate_bool_with_time(response.id, *on, 0.22));
+    let lit = hover_amount(ui, &response);
+    let track = mix(theme::TRACK, theme::GREEN, t).gamma_multiply(1.0 + 0.16 * lit);
+    let border = mix(theme::BORDER, theme::GREEN, t);
 
     let painter = ui.painter();
-    painter.rect_filled(rect, rect.height() / 2.0, track);
-
-    let knob_radius = 6.0;
-    let knob_x = egui::lerp(
-        (rect.min.x + knob_radius + 2.0)..=(rect.max.x - knob_radius - 2.0),
-        t,
+    painter.rect(
+        rect,
+        CornerRadius::same(12),
+        track,
+        Stroke::new(1.0_f32, border),
+        StrokeKind::Inside,
     );
-    painter.circle_filled(Pos2::new(knob_x, rect.center().y), knob_radius, knob);
+
+    let radius = 9.0;
+    let cx = egui::lerp((rect.left() + radius + 3.0)..=(rect.right() - radius - 3.0), t);
+    let squash = if response.is_pointer_button_down_on() {
+        2.0
+    } else {
+        0.0
+    };
+    let knob = Rect::from_center_size(
+        Pos2::new(cx, rect.center().y),
+        Vec2::new(radius * 2.0 + squash * 2.0, radius * 2.0),
+    );
+    painter.rect_filled(
+        knob.translate(Vec2::new(0.0, 1.0)),
+        CornerRadius::same(9),
+        Color32::from_black_alpha(80),
+    );
+    painter.rect_filled(
+        knob,
+        CornerRadius::same(9),
+        mix(Color32::from_rgb(0xd4, 0xd4, 0xd8), Color32::WHITE, t),
+    );
 
     response
 }
@@ -707,19 +741,16 @@ pub(crate) fn device_option(ui: &mut egui::Ui, label: &str, selected: bool) -> R
 
 pub(crate) fn refresh_button(ui: &mut egui::Ui) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
-    let painter = ui.painter();
-    let fill = if response.hovered() {
-        theme::WIDGET
-    } else {
-        theme::CARD
-    };
+    let lit = hover_amount(ui, &response);
+    let held = response.is_pointer_button_down_on();
+    let fill = mix(theme::CARD, theme::WIDGET, lit);
     let border = if response.has_focus() {
         theme::TEXT_DIM
-    } else if response.hovered() {
-        theme::MENU_BORDER
     } else {
-        theme::OUTLINE
+        mix(theme::OUTLINE, theme::MENU_BORDER, lit)
     };
+    let rect = if held { rect.shrink(0.5) } else { rect };
+    let painter = ui.painter();
     painter.rect(
         rect,
         theme::CORNER_BUTTON,
@@ -728,11 +759,7 @@ pub(crate) fn refresh_button(ui: &mut egui::Ui) -> Response {
         StrokeKind::Inside,
     );
 
-    let color = if response.hovered() {
-        theme::TEXT
-    } else {
-        theme::TEXT_DIM
-    };
+    let color = mix(theme::TEXT_DIM, theme::TEXT, lit);
     refresh_icon(painter, rect.center(), 6.5, color);
 
     response.on_hover_text(deviceout_i18n::t().refresh_devices)
@@ -780,18 +807,23 @@ pub(crate) fn icon_button(
     tooltip: &str,
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+    let lit = hover_amount(ui, &response);
 
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, theme::CORNER_SMALL, theme::WIDGET_HOVER);
+    if lit > 0.0 {
+        ui.painter().rect_filled(
+            rect,
+            theme::CORNER_SMALL,
+            theme::WIDGET_HOVER.gamma_multiply(lit),
+        );
     }
 
-    let tint = if response.hovered() {
-        theme::TEXT
+    let tint = mix(theme::TEXT_FAINT, theme::TEXT, lit);
+    let size = if response.is_pointer_button_down_on() {
+        14.0
     } else {
-        theme::TEXT_FAINT
+        15.0
     };
-    let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(15.0));
+    let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(size));
     egui::Image::new(source).tint(tint).paint_at(ui, icon_rect);
 
     response.on_hover_text(tooltip)
