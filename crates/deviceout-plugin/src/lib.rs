@@ -15,8 +15,8 @@ mod engine_ctl;
 mod heartbeat;
 
 pub(crate) use engine_ctl::{
-    min_target_ms, EngineController, DEFAULT_QUEUE_PERIODS, DEFAULT_TARGET_MS, QUEUE_PERIOD_STEPS,
-    TARGET_MS_STEPS,
+    min_target_ms, EngineController, DEFAULT_QUEUE_PERIODS, DEFAULT_TARGET_MS, MAX_TARGET_MS,
+    QUEUE_PERIOD_STEPS, TARGET_MS_STEPS,
 };
 pub(crate) use heartbeat::Heartbeat;
 

@@ -13,8 +13,8 @@ use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
 use crate::{
-    enumerate_devices, DeviceOutParams, EngineController, UiState, QUEUE_PERIOD_STEPS,
-    TARGET_MS_STEPS,
+    enumerate_devices, DeviceOutParams, EngineController, UiState, MAX_TARGET_MS,
+    QUEUE_PERIOD_STEPS, TARGET_MS_STEPS,
 };
 use deviceout_engine::ASSUMED_PERIOD_MS;
 
@@ -72,8 +72,8 @@ struct EditorUi {
     check_mark_attempt: Option<i64>,
     prompt_wait: Option<PromptWait>,
     telemetry_opt_in: bool,
-    target_text: String,
-    queue_text: String,
+    target_drag: Option<u32>,
+    queue_drag: Option<u32>,
     send_watch: Option<(String, Instant)>,
     note: Option<(Instant, String, egui::Color32)>,
 }
@@ -87,8 +87,8 @@ impl Default for EditorUi {
             check_mark_attempt: None,
             prompt_wait: None,
             telemetry_opt_in: deviceout_update::telemetry::is_enabled(),
-            target_text: String::new(),
-            queue_text: String::new(),
+            target_drag: None,
+            queue_drag: None,
             send_watch: None,
             note: None,
         }
@@ -460,7 +460,10 @@ fn target_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
     let floor = w.engine.target_floor_ms();
     let committed = w.engine.target_ms();
     if committed < floor {
-        *w.params.target_ms.write() = w.engine.request_target_ms(committed);
+        let raised = w.engine.request_target_ms(committed);
+        *w.params.target_ms.write() = raised;
+        let text = fill(t().target_floor_hit, &[("ms", &raised.to_string())]);
+        note(state, text, theme::AMBER);
     }
 
     widgets::section_heading(ui, t().heading_target_latency, None);
@@ -471,12 +474,13 @@ fn target_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring) {
         widgets::NumberCombo {
             value: w.engine.target_ms(),
             floor,
+            ceiling: MAX_TARGET_MS,
             steps: TARGET_MS_STEPS,
             unit: MS,
             blocked: t().step_unavailable,
-            editable: true,
+            scrub: true,
         },
-        &mut state.target_text,
+        &mut state.target_drag,
     );
     if let Some(wanted) = picked {
         let applied = w.engine.request_target_ms(wanted);
@@ -503,12 +507,13 @@ fn queue_row(ui: &mut egui::Ui, state: &mut EditorUi, w: &Wiring, snap: Option<&
         widgets::NumberCombo {
             value: queue_ms(w.engine.queue_periods(), period_ms),
             floor: 0,
+            ceiling: u32::MAX,
             steps: &steps,
             unit: MS,
             blocked: t().step_unavailable,
-            editable: false,
+            scrub: false,
         },
-        &mut state.queue_text,
+        &mut state.queue_drag,
     );
     if let Some(ms) = picked {
         let periods = (f64::from(ms) / period_ms).round() as u32;

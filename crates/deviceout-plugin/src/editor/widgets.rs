@@ -221,17 +221,20 @@ pub(crate) fn status_indicator(ui: &mut egui::Ui, state: Option<EngineState>) {
 pub(crate) struct NumberCombo<'a> {
     pub value: u32,
     pub floor: u32,
+    pub ceiling: u32,
     pub steps: &'a [u32],
     pub unit: &'a str,
     pub blocked: &'a str,
-    pub editable: bool,
+    pub scrub: bool,
 }
+
+const PX_PER_STEP: f32 = 4.0;
 
 pub(crate) fn number_combo(
     ui: &mut egui::Ui,
     id: &str,
     combo: NumberCombo<'_>,
-    buf: &mut String,
+    drag: &mut Option<u32>,
 ) -> Option<u32> {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
@@ -241,7 +244,7 @@ pub(crate) fn number_combo(
     let frame = painter.add(Shape::Noop);
 
     let arrow_rect = Rect::from_min_max(Pos2::new(rect.right() - 32.0, rect.top()), rect.max);
-    let hit = if combo.editable { arrow_rect } else { rect };
+    let hit = if combo.scrub { arrow_rect } else { rect };
     let arrow = ui.interact(hit, popup_id.with("arrow"), Sense::click());
     if arrow.clicked() {
         ui.memory_mut(|memory| memory.toggle_popup(popup_id));
@@ -261,43 +264,50 @@ pub(crate) fn number_combo(
         Pos2::new(arrow_rect.left() - unit_width - 12.0, rect.bottom()),
     );
     let mut picked = None;
-    let edit = if combo.editable {
-        let mut field = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(edit_rect)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        );
-        let edit = field.add(
-            egui::TextEdit::singleline(buf)
-                .frame(false)
-                .font(FontId::monospace(14.0))
-                .text_color(theme::TEXT)
-                .desired_width(f32::INFINITY),
-        );
-        if edit.lost_focus() {
-            picked = buf.trim().parse::<u32>().ok();
-        }
-        if !edit.has_focus() {
-            let shown = combo.value.to_string();
-            if *buf != shown {
-                *buf = shown;
+    let field = if combo.scrub {
+        let field = ui.interact(edit_rect, popup_id.with("value"), Sense::click_and_drag());
+        let acc_id = popup_id.with("acc");
+        if field.dragged() {
+            let shown = drag.unwrap_or(combo.value);
+            let mut acc = ui.data_mut(|data| data.get_temp::<f32>(acc_id).unwrap_or(0.0))
+                + field.drag_delta().x;
+            let moved = (acc / PX_PER_STEP).trunc();
+            if moved != 0.0 {
+                acc -= moved * PX_PER_STEP;
+                let next = (shown as f32 + moved).max(0.0) as u32;
+                *drag = Some(next.clamp(combo.floor.max(1), combo.ceiling.max(1)));
+            }
+            ui.data_mut(|data| data.insert_temp(acc_id, acc));
+        } else {
+            ui.data_mut(|data| data.insert_temp(acc_id, 0.0_f32));
+            if field.drag_stopped() {
+                picked = drag.take();
+            } else {
+                *drag = None;
             }
         }
-        Some(edit)
+        if field.clicked() {
+            ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+        }
+        if field.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        Some(field)
     } else {
-        painter.text(
-            Pos2::new(edit_rect.left(), rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            combo.value,
-            FontId::monospace(14.0),
-            theme::TEXT,
-        );
         None
     };
 
-    let focused = edit.as_ref().is_some_and(|e| e.has_focus());
-    let hovered = edit.as_ref().is_some_and(|e| e.hovered());
-    let border = if focused {
+    painter.text(
+        Pos2::new(edit_rect.left(), rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        drag.unwrap_or(combo.value),
+        FontId::monospace(14.0),
+        theme::TEXT,
+    );
+
+    let busy = field.as_ref().is_some_and(|f| f.dragged());
+    let hovered = field.as_ref().is_some_and(|f| f.hovered());
+    let border = if busy {
         theme::PRIMARY
     } else if open || arrow.hovered() || hovered {
         theme::MENU_BORDER
@@ -391,7 +401,8 @@ pub(crate) fn number_combo(
                                     None
                                 };
                                 let label = format!("{step} {}", combo.unit);
-                                if combo_option(ui, &label, hint, step == combo.value).clicked()
+                                let here = step == drag.unwrap_or(combo.value);
+                                if combo_option(ui, &label, hint, here).clicked()
                                     && hint.is_none()
                                 {
                                     picked = Some(step);
