@@ -79,6 +79,7 @@ pub struct EngineMetrics {
     device_starvations: AtomicU64,
     running_seconds: AtomicU64,
     settled_after_s: AtomicU64,
+    settled: AtomicBool,
     reconnects: AtomicU64,
     frames_discarded: AtomicU64,
 
@@ -129,6 +130,7 @@ impl EngineMetrics {
             device_starvations: AtomicU64::new(0),
             running_seconds: AtomicU64::new(0),
             settled_after_s: AtomicU64::new(f64::INFINITY.to_bits()),
+            settled: AtomicBool::new(false),
             reconnects: AtomicU64::new(0),
             frames_discarded: AtomicU64::new(0),
             last_error: Mutex::new(None),
@@ -283,13 +285,17 @@ impl EngineMetrics {
         load_f64(&self.drift_ppm)
     }
 
+    pub(crate) fn set_settled(&self, settled: bool) {
+        self.settled.store(settled, Ordering::Relaxed);
+    }
+
     pub fn running_seconds(&self) -> f64 {
         load_f64(&self.running_seconds)
     }
 
     pub fn is_settled(&self) -> bool {
         self.state() == EngineState::Running
-            && self.running_seconds() >= load_f64(&self.settled_after_s)
+            && self.settled.load(Ordering::Relaxed)
     }
 
     pub fn drift_ppm_settled(&self) -> Option<f64> {

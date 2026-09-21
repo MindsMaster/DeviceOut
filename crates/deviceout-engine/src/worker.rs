@@ -53,6 +53,10 @@ const CAPACITY_FACTOR: usize = 4;
 const MIN_CAPACITY_FRAMES: usize = 2_048;
 const PERIOD_MARGIN: usize = 2;
 const SETTLE_COLD: f64 = 2.0;
+const SETTLE_CHECK_S: f64 = 2.0;
+const SETTLE_TOL_PPM: f64 = 2.0;
+const SETTLE_STABLE_CHECKS: u32 = 3;
+const SETTLE_MIN_S: f64 = 10.0;
 const SETTLE_WARM: f64 = 0.5;
 
 pub fn ring_capacity_frames(source_rate_hz: f64, ring_ms: f64) -> usize {
@@ -125,6 +129,49 @@ struct TargetLevel {
     frames: f64,
     floor: usize,
     total_floor_ms: f64,
+}
+
+#[derive(Debug)]
+struct SettleWatch {
+    deadline_s: f64,
+    last_ppm: f64,
+    next_check_s: f64,
+    stable: u32,
+    settled: bool,
+}
+
+impl SettleWatch {
+    fn new(deadline_s: f64, seed_ppm: f64) -> Self {
+        Self {
+            deadline_s,
+            last_ppm: seed_ppm,
+            next_check_s: SETTLE_CHECK_S,
+            stable: 0,
+            settled: false,
+        }
+    }
+
+    fn update(&mut self, ppm: f64, elapsed_s: f64) -> bool {
+        if self.settled {
+            return true;
+        }
+        if elapsed_s >= self.deadline_s {
+            self.settled = true;
+            return true;
+        }
+        if elapsed_s < self.next_check_s {
+            return false;
+        }
+        if (ppm - self.last_ppm).abs() <= SETTLE_TOL_PPM {
+            self.stable += 1;
+        } else {
+            self.stable = 0;
+        }
+        self.last_ppm = ppm;
+        self.next_check_s = elapsed_s + SETTLE_CHECK_S;
+        self.settled = self.stable >= SETTLE_STABLE_CHECKS && elapsed_s >= SETTLE_MIN_S;
+        self.settled
+    }
 }
 
 pub trait OpenSink: Send + 'static {
@@ -352,6 +399,7 @@ struct Worker<S: AudioSink> {
     warmup_periods: usize,
     prime_timeout_s: f64,
     target_frames: f64,
+    settle: SettleWatch,
 }
 
 impl<S: AudioSink> Worker<S> {
@@ -421,6 +469,7 @@ impl<S: AudioSink> Worker<S> {
             warmup_periods: 4,
             prime_timeout_s: config.prime_timeout_s,
             target_frames,
+            settle: SettleWatch::new(settle_wait(config), config.initial_drift_ppm),
         })
     }
 
@@ -500,14 +549,17 @@ impl<S: AudioSink> Worker<S> {
                 self.resampler.set_ratio(self.ctrl.ratio());
             }
 
+            let elapsed = period as f64 * self.dt_s;
+            let drift = self.ctrl.drift_ppm();
             metrics.publish(
                 fill,
                 self.ctrl.smoothed_fill(),
-                self.ctrl.drift_ppm(),
+                drift,
                 self.resampler.ratio(),
                 self.resampler.clamp_events(),
-                period as f64 * self.dt_s,
+                elapsed,
             );
+            metrics.set_settled(self.settle.update(drift, elapsed));
             metrics.publish_device(report.queued_frames, report.starved);
         }
 
@@ -585,6 +637,45 @@ mod tests {
         assert_eq!(level(500.0, 512, 480, 16_384, 0.0).frames, 8_192.0);
         let l = level(30.0, 65_536, 480, 2_048, 0.0);
         assert_eq!((l.frames, l.floor), (1_024.0, 1_024));
+    }
+
+    #[test]
+    fn a_steady_reading_settles_long_before_the_deadline() {
+        let mut watch = SettleWatch::new(120.0, 0.0);
+        let mut elapsed = 0.0;
+        let mut settled_at = None;
+        while elapsed < 120.0 {
+            elapsed += 0.01;
+            if watch.update(-133.5, elapsed) {
+                settled_at = Some(elapsed);
+                break;
+            }
+        }
+        let at = settled_at.expect("稳定的读数应当在截止前判定收敛");
+        assert!(at < 20.0, "收敛判定太晚: {at}");
+    }
+
+    #[test]
+    fn a_reading_that_keeps_moving_waits_for_the_deadline() {
+        let mut watch = SettleWatch::new(30.0, 0.0);
+        let mut elapsed = 0.0;
+        let mut ppm = 0.0;
+        while elapsed < 29.0 {
+            elapsed += 0.01;
+            ppm += 0.5;
+            assert!(!watch.update(ppm, elapsed), "还在移动就不该判定收敛");
+        }
+        assert!(watch.update(ppm, 30.0), "过了截止时间仍应放行");
+    }
+
+    #[test]
+    fn it_never_calls_it_settled_in_the_opening_seconds() {
+        let mut watch = SettleWatch::new(120.0, -100.0);
+        let mut elapsed = 0.0;
+        while elapsed < 9.5 {
+            elapsed += 0.01;
+            assert!(!watch.update(-100.0, elapsed), "{elapsed} s 就判定收敛太早");
+        }
     }
 
     #[test]
