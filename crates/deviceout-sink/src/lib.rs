@@ -13,7 +13,7 @@ pub use error::SinkError;
 #[cfg(windows)]
 pub use priority::AudioPriority;
 #[cfg(windows)]
-pub use render::WasapiSink;
+pub use render::{device_queue_limit, WasapiSink};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WriteReport {

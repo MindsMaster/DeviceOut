@@ -14,6 +14,13 @@ use crate::wasapi::{find_device_by_id, parse_format, ComGuard};
 use crate::{AudioSink, WriteReport};
 
 const WAIT_TIMEOUT_MS: u32 = 2000;
+const QUEUE_PERIODS: usize = 2;
+
+pub fn device_queue_limit(period_frames: usize, buffer_frames: usize) -> usize {
+    period_frames
+        .saturating_mul(QUEUE_PERIODS)
+        .clamp(1, buffer_frames.max(1))
+}
 
 #[derive(Debug)]
 struct EventHandle(HANDLE);
@@ -42,6 +49,7 @@ pub struct WasapiSink {
     format: StreamFormat,
     buffer_frames: u32,
     period_frames: usize,
+    queue_limit: usize,
     running: bool,
     _com: ComGuard,
 }
@@ -97,17 +105,23 @@ impl WasapiSink {
                 .GetService()
                 .map_err(|e| SinkError::init_from_hresult("获取渲染服务失败", e))?;
 
+            let period_frames = period_frames.max(1);
             Ok(Self {
                 render,
                 client,
                 event,
                 format,
                 buffer_frames,
-                period_frames: period_frames.max(1),
+                period_frames,
+                queue_limit: device_queue_limit(period_frames, buffer_frames as usize),
                 running: false,
                 _com: com,
             })
         }
+    }
+
+    pub fn queue_limit_frames(&self) -> usize {
+        self.queue_limit
     }
 
     fn padding(&self) -> Result<u32, SinkError> {
@@ -141,21 +155,21 @@ impl AudioSink for WasapiSink {
     }
 
     fn prefill_silence(&mut self) -> Result<usize, SinkError> {
-        let free = self.buffer_frames.saturating_sub(self.padding()?);
-        if free == 0 {
+        let room = self.queue_limit.saturating_sub(self.padding()? as usize) as u32;
+        if room == 0 {
             return Ok(0);
         }
         unsafe {
             let dst = self
                 .render
-                .GetBuffer(free)
+                .GetBuffer(room)
                 .map_err(|e| SinkError::from_hresult("获取设备缓冲失败", e))?;
-            ptr::write_bytes(dst, 0, free as usize * self.format.frame_bytes());
+            ptr::write_bytes(dst, 0, room as usize * self.format.frame_bytes());
             self.render
-                .ReleaseBuffer(free, 0)
+                .ReleaseBuffer(room, 0)
                 .map_err(|e| SinkError::from_hresult("提交设备缓冲失败", e))?;
         }
-        Ok(free as usize)
+        Ok(room as usize)
     }
 
     fn start(&mut self) -> Result<(), SinkError> {
@@ -191,8 +205,8 @@ impl AudioSink for WasapiSink {
 
         while done < total_frames {
             let padding = self.padding()? as usize;
-            let free = self.buffer_frames as usize - padding.min(self.buffer_frames as usize);
-            if free == 0 {
+            let room = self.queue_limit.saturating_sub(padding);
+            if room == 0 {
                 self.wait_for_device()?;
                 continue;
             }
@@ -200,7 +214,7 @@ impl AudioSink for WasapiSink {
                 report.starved = true;
             }
 
-            let n = free.min(total_frames - done);
+            let n = room.min(total_frames - done);
             unsafe {
                 let dst = self
                     .render
@@ -253,6 +267,20 @@ unsafe fn write_samples(dst: *mut u8, src: &[f32], fmt: SampleFormat) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_device_queue_holds_a_couple_of_periods_not_the_whole_buffer() {
+        assert_eq!(device_queue_limit(480, 1_920), 960);
+        assert_eq!(device_queue_limit(480, 4_800), 960);
+        assert_eq!(device_queue_limit(128, 1_920), 256);
+    }
+
+    #[test]
+    fn the_device_queue_never_exceeds_the_allocated_buffer() {
+        assert_eq!(device_queue_limit(480, 480), 480);
+        assert_eq!(device_queue_limit(480, 0), 1);
+        assert_eq!(device_queue_limit(usize::MAX, 1_920), 1_920);
+    }
 
     fn rendered(fmt: SampleFormat, src: &[f32]) -> Vec<u8> {
         let mut buf = vec![0xAAu8; src.len() * fmt.bytes() + 8];
