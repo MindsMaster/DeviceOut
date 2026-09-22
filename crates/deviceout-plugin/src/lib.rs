@@ -21,7 +21,7 @@ pub(crate) use engine_ctl::{
 pub(crate) use heartbeat::Heartbeat;
 
 const EDITOR_WIDTH: u32 = 440;
-const EDITOR_HEIGHT: u32 = 560;
+const EDITOR_HEIGHT: u32 = 600;
 
 pub struct DeviceOut {
     params: Arc<DeviceOutParams>,
@@ -42,7 +42,6 @@ impl std::fmt::Debug for DeviceOut {
 
 #[derive(Params)]
 struct DeviceOutParams {
-    #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
 
     #[persist = "device-id"]

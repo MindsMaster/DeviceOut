@@ -300,16 +300,26 @@ fn the_shortest_period_is_only_reported_when_the_device_names_one() {
 
 #[test]
 fn every_tab_fits_the_plugin_window() {
+    const HEADROOM: f32 = 24.0;
     let budget = crate::EDITOR_HEIGHT as f32 - 32.0;
+    let mut worst = (0usize, 0usize, 0.0f32);
     for tab in 0..3 {
-        for snapshot in [None, Some(running_snapshot()), Some(failed_snapshot())] {
+        for (case, snapshot) in [None, Some(running_snapshot()), Some(failed_snapshot())]
+            .into_iter()
+            .enumerate()
+        {
             let height = render_body(snapshot, tab);
-            assert!(
-                height <= budget,
-                "tab {tab} needs {height} of {budget} available"
-            );
+            if height > worst.2 {
+                worst = (tab, case, height);
+            }
         }
     }
+
+    let (tab, case, height) = worst;
+    assert!(
+        height + HEADROOM <= budget,
+        "面板不再滚动，最高的一页（标签 {tab}、快照 {case}）要 {height} 像素，可用 {budget}，余量不足 {HEADROOM}"
+    );
 }
 
 #[test]
@@ -912,5 +922,19 @@ fn device_menu_wraps_long_names_without_widening_the_window() {
         "菜单文字位置 {:?}，边界 {:?}",
         option.pos,
         option.galley.rect
+    );
+}
+
+#[test]
+fn the_window_size_is_not_restored_from_a_saved_project() {
+    let params = DeviceOutParams::default();
+    let mut state = Vec::new();
+    params.serialize_fields().keys().for_each(|key| {
+        state.push(key.clone());
+    });
+
+    assert!(
+        !state.iter().any(|key| key == "editor-state"),
+        "窗口尺寸仍在随工程存档，旧工程会把窗口钉死在老版本的高度上：{state:?}"
     );
 }
