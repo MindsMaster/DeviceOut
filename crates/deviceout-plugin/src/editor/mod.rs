@@ -41,7 +41,7 @@ const TAB_ABOUT: usize = 2;
 const REPO_URL: &str = "https://github.com/MindsMaster/DeviceOut";
 const AUTHOR_EMAIL: &str = "an5w1r@163.com";
 const QQ_GROUP: &str = "1046048297";
-const DISCORD_URL: &str = "https://discord.gg/u9n5E894wK";
+const DISCORD_URL: &str = "https://discord.invite.azuramc.cc";
 const QQ_GROUP_URL: &str = "https://qun.qq.com/universal-share/share?ac=1&authKey=QEsKQUh0Z2dhNgn2lQDrnRRGD0MALQvTfF3FPr5ZYOv8i/lKdNp8G6gjTgYrD/Rw&busi_data=eyJncm91cENvZGUiOiIxMDQ2MDQ4Mjk3IiwidG9rZW4iOiJRR3lINzRUTUt0U2M0bDRkeTRhTERCT0ZscFlsTUxBNm9TdjUwelYxZXN2dzdUWUlyWnY0Mi9oOHI3c2JBOEYrIiwidWluIjoiMTE3MzM0ODYxMCJ9&data=EuNu7PewjDdMH0GF2GuEOYyIXT8iT25RJajcGVD3qL5LXkiATxSyzB-gdxqgbbFkbRvkyzoiJQ_sJ8-tBfFbSuW4NYFdjzdIr5Z1E8reAiM&svctype=5&tempid=h5_group_info";
 
 pub(crate) struct Wiring {
