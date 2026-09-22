@@ -53,6 +53,7 @@ pub(crate) fn install(ctx: &egui::Context) {
     style.spacing.item_spacing = Vec2::new(8.0, 6.0);
     style.spacing.button_padding = Vec2::new(12.0, 7.0);
     style.spacing.interact_size.y = 32.0;
+    style.spacing.tooltip_width = 320.0;
 
     let mut scroll = egui::style::ScrollStyle::floating();
     scroll.bar_width = 8.0;

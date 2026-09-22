@@ -457,13 +457,9 @@ fn stream_section(ui: &mut egui::Ui, s: &UiState) {
                 t().mode_shared
             },
         );
-        let tooltip_width = ui.available_width();
         for alert in stream_alerts(s).into_iter().take(MAX_ALERTS) {
             ui.add_space(6.0);
-            widgets::alert_line_compact(ui, theme::AMBER, &alert).on_hover_ui(|ui| {
-                ui.set_max_width(tooltip_width);
-                ui.add(egui::Label::new(&alert).wrap());
-            });
+            widgets::alert_line_compact(ui, theme::AMBER, &alert);
         }
     }
 }

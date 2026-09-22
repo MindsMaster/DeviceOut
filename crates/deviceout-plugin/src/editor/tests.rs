@@ -1075,3 +1075,36 @@ fn the_update_button_hugs_the_right_edge_like_every_other_control() {
         panel.center().x
     );
 }
+
+#[test]
+fn a_truncated_alert_shows_one_tooltip_not_two() {
+    let mut h = BodyHarness::new();
+    h.snapshot = Some(UiState {
+        underruns: 1_000_000_000_000_000,
+        overruns: 1_000_000_000_000_000,
+        dropout_seconds: 1_234_567_890.5,
+        ..running_snapshot()
+    });
+    h.frame(Vec::new());
+    let (_, text) = h.frame(Vec::new());
+
+    let alert = text
+        .iter()
+        .find(|shape| shape.galley.elided && shape.galley.job.text.contains("1000000000000000"))
+        .expect("面板上没有被截断的断流提示");
+    let full = alert.galley.job.text.clone();
+    let pointer = alert.pos + egui::vec2(5.0, 5.0);
+
+    h.frame(vec![egui::Event::PointerMoved(pointer)]);
+    h.time += 1.0;
+    h.frame(Vec::new());
+    let (_, text) = h.frame(Vec::new());
+
+    assert_eq!(
+        text.iter()
+            .filter(|shape| shape.galley.job.text == full)
+            .count(),
+        2,
+        "截断的提示行本身一份、悬停提示一份，多出来的是重复弹出的提示"
+    );
+}
