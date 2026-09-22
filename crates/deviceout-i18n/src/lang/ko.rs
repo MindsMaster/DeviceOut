@@ -28,7 +28,7 @@ pub static STRINGS: Strings = Strings {
     heading_version: "버전",
     mode_shared: "공유",
     mode_exclusive: "단독",
-    buffer_at_target: "목표 수위 도달",
+    buffer_at_target: "안정",
     restore_defaults: "기본값 복원",
     exclusive_fell_back: "독점 모드를 사용할 수 없어 공유 모드로 동작 중",
     step_unavailable: "시스템 하한보다 낮음",

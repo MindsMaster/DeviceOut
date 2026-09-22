@@ -28,7 +28,7 @@ pub static STRINGS: Strings = Strings {
     heading_version: "版本",
     mode_shared: "共享",
     mode_exclusive: "獨佔",
-    buffer_at_target: "已在目標水位",
+    buffer_at_target: "穩定",
     restore_defaults: "還原預設值",
     exclusive_fell_back: "獨佔模式不可用，已回落共用模式",
     step_unavailable: "低於系統下限",

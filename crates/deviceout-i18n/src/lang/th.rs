@@ -28,7 +28,7 @@ pub static STRINGS: Strings = Strings {
     heading_version: "เวอร์ชัน",
     mode_shared: "แบ่งใช้",
     mode_exclusive: "เฉพาะ",
-    buffer_at_target: "อยู่ที่ระดับเป้าหมาย",
+    buffer_at_target: "เสถียร",
     restore_defaults: "คืนค่าเริ่มต้น",
     exclusive_fell_back: "ใช้โหมดเอกสิทธิ์ไม่ได้ กำลังใช้โหมดแบ่งใช้",
     step_unavailable: "ต่ำกว่าขีดจำกัดของระบบ",

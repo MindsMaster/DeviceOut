@@ -28,7 +28,7 @@ pub static STRINGS: Strings = Strings {
     heading_version: "Versión",
     mode_shared: "Compartido",
     mode_exclusive: "Exclusivo",
-    buffer_at_target: "En el nivel objetivo",
+    buffer_at_target: "Estable",
     restore_defaults: "Restaurar valores",
     exclusive_fell_back: "Modo exclusivo no disponible, usando modo compartido",
     step_unavailable: "por debajo del mínimo del sistema",

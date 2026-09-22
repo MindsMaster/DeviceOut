@@ -28,7 +28,7 @@ pub static STRINGS: Strings = Strings {
     heading_version: "Версия",
     mode_shared: "Общий",
     mode_exclusive: "Монопольный",
-    buffer_at_target: "На целевом уровне",
+    buffer_at_target: "Стабильно",
     restore_defaults: "Сбросить настройки",
     exclusive_fell_back: "Монопольный режим недоступен, используется общий",
     step_unavailable: "ниже предела системы",

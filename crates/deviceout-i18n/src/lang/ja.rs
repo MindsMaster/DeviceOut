@@ -28,7 +28,7 @@ pub static STRINGS: Strings = Strings {
     heading_version: "バージョン",
     mode_shared: "共有",
     mode_exclusive: "排他",
-    buffer_at_target: "目標水位に到達",
+    buffer_at_target: "安定",
     restore_defaults: "既定値に戻す",
     exclusive_fell_back: "排他モードを利用できないため共有モードで動作中",
     step_unavailable: "システムの下限を下回ります",
