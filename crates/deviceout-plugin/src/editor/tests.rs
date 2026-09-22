@@ -1,4 +1,5 @@
 use super::*;
+use deviceout_sink::DeviceInfo;
 
 struct DeviceCardHarness {
     ctx: egui::Context,
@@ -29,7 +30,7 @@ impl DeviceCardHarness {
             wiring: Wiring {
                 params,
                 engine: Arc::new(EngineController::default()),
-                devices: Arc::new(RwLock::new(vec![device])),
+                devices: Arc::new(vec![device].into()),
             },
             snapshot: None,
             time: 0.0,
@@ -138,7 +139,7 @@ fn render_body(snapshot: Option<UiState>, tab: usize) -> f32 {
     let wiring = Wiring {
         params,
         engine: Arc::new(EngineController::default()),
-        devices: Arc::new(RwLock::new(vec![DeviceInfo {
+        devices: Arc::new(Devices::from(vec![DeviceInfo {
             id: "test-device".into(),
             name: "CABLE Input (VB-Audio Virtual Cable)".into(),
             is_default: false,
@@ -955,7 +956,7 @@ impl BodyHarness {
             wiring: Wiring {
                 params,
                 engine: Arc::new(EngineController::default()),
-                devices: Arc::new(RwLock::new(vec![
+                devices: Arc::new(Devices::from(vec![
                     device("cable", "CABLE Input (VB-Audio Virtual Cable)"),
                     device("realtek", "Realtek Digital Output"),
                 ])),

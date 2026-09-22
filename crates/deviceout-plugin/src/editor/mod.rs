@@ -5,15 +5,15 @@ use std::time::{Duration, Instant};
 
 use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 
 use deviceout_engine::{Fault, FaultKind};
 use deviceout_i18n::{fill, t, Strings};
-use deviceout_sink::{DeviceInfo, SampleFormat, StreamFormat};
+use deviceout_sink::{SampleFormat, StreamFormat};
 use deviceout_update::outbox::FeedbackKind;
 
 use crate::{
-    enumerate_devices, DeviceOutParams, EngineController, UiState, DEFAULT_QUEUE_PERIODS,
+    spawn, DeviceOutParams, Devices, EngineController, UiState, DEFAULT_QUEUE_PERIODS,
     DEFAULT_TARGET_MS, MAX_TARGET_MS, QUEUE_PERIOD_STEPS, TARGET_MS_STEPS,
 };
 use deviceout_engine::ASSUMED_PERIOD_MS;
@@ -26,7 +26,7 @@ mod widgets;
 #[cfg(windows)]
 mod win_prompt;
 
-type SharedDevices = Arc<RwLock<Vec<DeviceInfo>>>;
+type SharedDevices = Arc<Devices>;
 
 const INSTALL_BUTTON_COOLDOWN: Duration = Duration::from_secs(30);
 const UPDATE_VIEW_INTERVAL: Duration = Duration::from_secs(1);
@@ -198,7 +198,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that_detached(REPO_URL);
+                spawn::open_url(REPO_URL);
             }
             if widgets::icon_button(
                 ui,
@@ -207,7 +207,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that_detached(QQ_GROUP_URL);
+                spawn::open_url(QQ_GROUP_URL);
             }
             if widgets::icon_button(
                 ui,
@@ -216,7 +216,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that_detached(DISCORD_URL);
+                spawn::open_url(DISCORD_URL);
             }
             if widgets::icon_button(
                 ui,
@@ -225,7 +225,7 @@ fn header(ui: &mut egui::Ui, snap: Option<&UiState>) {
             )
             .clicked()
             {
-                let _ = open::that_detached(format!("mailto:{AUTHOR_EMAIL}"));
+                spawn::open_url(format!("mailto:{AUTHOR_EMAIL}"));
             }
         });
     });
@@ -267,7 +267,7 @@ fn device_section(ui: &mut egui::Ui, w: &Wiring, snap: Option<&UiState>) {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if widgets::refresh_button(ui).clicked() {
-                    *w.devices.write() = enumerate_devices();
+                    w.devices.scan_async();
                 }
 
                 let mut chosen: Option<String> = None;

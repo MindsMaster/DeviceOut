@@ -7,13 +7,14 @@ use nih_plug_egui::EguiState;
 use parking_lot::RwLock;
 
 use deviceout_engine::{EngineConfig, EngineState, Fault};
-use deviceout_sink::wasapi::{list_output_devices, ComGuard};
-use deviceout_sink::DeviceInfo;
 
+mod devices;
 mod editor;
 mod engine_ctl;
 mod heartbeat;
+mod spawn;
 
+pub(crate) use devices::Devices;
 pub(crate) use engine_ctl::{
     min_target_ms, EngineController, DEFAULT_QUEUE_PERIODS, DEFAULT_TARGET_MS, MAX_TARGET_MS,
     QUEUE_PERIOD_STEPS, TARGET_MS_STEPS,
@@ -27,7 +28,7 @@ pub struct DeviceOut {
     params: Arc<DeviceOutParams>,
     engine: Arc<EngineController>,
     scratch: Vec<f32>,
-    devices: Arc<RwLock<Vec<DeviceInfo>>>,
+    devices: Arc<Devices>,
     heartbeat: Option<Heartbeat>,
 }
 
@@ -75,17 +76,10 @@ impl Default for DeviceOut {
             params: Arc::new(DeviceOutParams::default()),
             engine: Arc::new(EngineController::default()),
             scratch: Vec::new(),
-            devices: Arc::new(RwLock::new(Vec::new())),
+            devices: Arc::default(),
             heartbeat: None,
         }
     }
-}
-
-fn enumerate_devices() -> Vec<DeviceInfo> {
-    let Ok(_com) = ComGuard::new() else {
-        return Vec::new();
-    };
-    list_output_devices().unwrap_or_default()
 }
 
 impl Plugin for DeviceOut {
@@ -134,7 +128,7 @@ impl Plugin for DeviceOut {
 
         self.scratch = vec![0.0; buffer_config.max_buffer_size as usize * channels];
 
-        *self.devices.write() = enumerate_devices();
+        self.devices.scan();
 
         let device_id = {
             let stored = self.params.device_id.read().clone();

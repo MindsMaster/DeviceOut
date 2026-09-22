@@ -320,21 +320,15 @@ impl EngineController {
         let Some(device) = self.device.read().clone() else {
             return;
         };
-        std::thread::Builder::new()
-            .name(name.into())
-            .spawn(move || {
-                set(&device);
-                device.reshape();
-            })
-            .ok();
+        crate::spawn::detach(name, move || {
+            set(&device);
+            device.reshape();
+        });
     }
 
     fn spawn(self: &Arc<Self>, name: &str, job: impl FnOnce(&Self) + Send + 'static) {
         let ctl = Arc::clone(self);
-        std::thread::Builder::new()
-            .name(name.into())
-            .spawn(move || job(&ctl))
-            .ok();
+        crate::spawn::detach(name, move || job(&ctl));
     }
 
     fn set_device(&self, device_id: String) {
