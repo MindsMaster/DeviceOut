@@ -62,6 +62,7 @@ impl AudioSink for FakeSink {
             .fetch_add(interleaved.len() / CHANNELS, Ordering::SeqCst);
         Ok(WriteReport {
             queued_frames: PERIOD * 3,
+            thinnest_frames: PERIOD * 2,
             starved: false,
         })
     }

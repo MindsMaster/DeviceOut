@@ -21,6 +21,7 @@ pub use render::{
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WriteReport {
     pub queued_frames: usize,
+    pub thinnest_frames: usize,
     pub starved: bool,
 }
 

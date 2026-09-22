@@ -397,7 +397,10 @@ impl AudioSink for WasapiSink {
 
         let total_frames = interleaved.len() / channels;
         let mut done = 0usize;
-        let mut report = WriteReport::default();
+        let mut report = WriteReport {
+            thinnest_frames: usize::MAX,
+            ..WriteReport::default()
+        };
 
         while done < total_frames {
             let padding = self.padding()? as usize;
@@ -406,6 +409,7 @@ impl AudioSink for WasapiSink {
                 self.wait_for_device()?;
                 continue;
             }
+            report.thinnest_frames = report.thinnest_frames.min(padding);
             if padding == 0 && self.running {
                 report.starved = true;
             }
@@ -427,6 +431,9 @@ impl AudioSink for WasapiSink {
 
             done += n;
             report.queued_frames = padding + n;
+        }
+        if report.thinnest_frames == usize::MAX {
+            report.thinnest_frames = 0;
         }
         Ok(report)
     }
