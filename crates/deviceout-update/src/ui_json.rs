@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -8,8 +7,6 @@ use crate::paths;
 
 const READ_ATTEMPTS: u32 = 3;
 const READ_BACKOFF: std::time::Duration = std::time::Duration::from_millis(20);
-const DRIFT_CAP: usize = 32;
-const DRIFT_LIMIT_PPM: f64 = 20_000.0;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct UiJson {
@@ -25,44 +22,6 @@ pub struct UiJson {
     pub last_ping_try_unix: Option<i64>,
     #[serde(default)]
     pub ping_interval_secs: Option<i64>,
-    #[serde(default)]
-    pub drift_ppm: BTreeMap<String, DriftMemory>,
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
-pub struct DriftMemory {
-    pub ppm: f64,
-    pub at: i64,
-}
-
-pub fn remember_drift(device_id: &str, ppm: f64, at: i64) {
-    if device_id.is_empty() || !ppm.is_finite() || ppm.abs() > DRIFT_LIMIT_PPM {
-        return;
-    }
-    let _ = update_ui_json(|ui| record_drift(&mut ui.drift_ppm, device_id, ppm, at));
-}
-
-pub fn recall_drift(device_id: &str) -> f64 {
-    load_ui_json()
-        .drift_ppm
-        .get(device_id)
-        .map(|m| m.ppm)
-        .filter(|ppm| ppm.is_finite() && ppm.abs() <= DRIFT_LIMIT_PPM)
-        .unwrap_or(0.0)
-}
-
-fn record_drift(store: &mut BTreeMap<String, DriftMemory>, device_id: &str, ppm: f64, at: i64) {
-    store.insert(device_id.to_string(), DriftMemory { ppm, at });
-    while store.len() > DRIFT_CAP {
-        let Some(oldest) = store
-            .iter()
-            .min_by_key(|(_, m)| m.at)
-            .map(|(k, _)| k.clone())
-        else {
-            break;
-        };
-        store.remove(&oldest);
-    }
 }
 
 pub fn load_ui_json() -> UiJson {
@@ -112,23 +71,6 @@ pub(crate) fn update_at<T>(path: &Path, edit: impl FnOnce(&mut UiJson) -> T) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_newest_drift_wins_and_the_oldest_is_evicted() {
-        let mut store = BTreeMap::new();
-        for i in 0..DRIFT_CAP + 4 {
-            record_drift(&mut store, &format!("dev{i}"), i as f64, i as i64);
-        }
-        assert_eq!(store.len(), DRIFT_CAP);
-        assert!(!store.contains_key("dev0"));
-        assert!(!store.contains_key("dev3"));
-        assert!(store.contains_key("dev4"));
-        assert_eq!(store["dev35"].ppm, 35.0);
-
-        record_drift(&mut store, "dev35", -12.5, 900);
-        assert_eq!(store.len(), DRIFT_CAP);
-        assert_eq!(store["dev35"].ppm, -12.5);
-    }
 
     fn temp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("deviceout-ui-{name}-{}", std::process::id()));

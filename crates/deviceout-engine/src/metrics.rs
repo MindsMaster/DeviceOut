@@ -79,7 +79,11 @@ pub struct EngineMetrics {
     resampler_delay_frames: AtomicU64,
     device_queue_frames: AtomicU64,
     device_starvations: AtomicU64,
+    device_queue_low: AtomicU64,
+    host_silence: AtomicU64,
     running_seconds: AtomicU64,
+    fill_low: AtomicU64,
+    fill_high: AtomicU64,
     settled_after_s: AtomicU64,
     settled: AtomicBool,
     reconnects: AtomicU64,
@@ -109,9 +113,9 @@ pub fn latency_ms(
 }
 
 impl EngineMetrics {
-    pub(crate) fn new(stats: Arc<BridgeStats>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            stats,
+            stats: Arc::new(BridgeStats::default()),
             state: AtomicU8::new(EngineState::Priming.code()),
             fill_frames: AtomicU64::new(0),
             capacity_frames: AtomicU64::new(0),
@@ -131,7 +135,11 @@ impl EngineMetrics {
             resampler_delay_frames: AtomicU64::new(0),
             device_queue_frames: AtomicU64::new(0),
             device_starvations: AtomicU64::new(0),
+            device_queue_low: AtomicU64::new(u64::MAX),
+            host_silence: AtomicU64::new(0),
             running_seconds: AtomicU64::new(0),
+            fill_low: AtomicU64::new(u64::MAX),
+            fill_high: AtomicU64::new(0),
             settled_after_s: AtomicU64::new(f64::INFINITY.to_bits()),
             settled: AtomicBool::new(false),
             reconnects: AtomicU64::new(0),
@@ -204,11 +212,22 @@ impl EngineMetrics {
         store_f64(&self.settled_after_s, settled_after_s);
     }
 
-    pub(crate) fn publish_device(&self, queued_frames: usize, starved: bool) {
+    pub(crate) fn publish_device(&self, queued_frames: usize, thinnest: usize, starved: bool) {
         self.device_queue_frames
             .store(queued_frames as u64, Ordering::Relaxed);
+        self.device_queue_low
+            .fetch_min(thinnest as u64, Ordering::Relaxed);
         if starved {
             self.device_starvations.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn take_device_queue_low(&self) -> u64 {
+        let low = self.device_queue_low.swap(u64::MAX, Ordering::Relaxed);
+        if low == u64::MAX {
+            0
+        } else {
+            low
         }
     }
 
@@ -223,6 +242,10 @@ impl EngineMetrics {
     ) {
         self.fill_frames
             .store(fill_frames as u64, Ordering::Relaxed);
+        self.fill_low
+            .fetch_min(fill_frames as u64, Ordering::Relaxed);
+        self.fill_high
+            .fetch_max(fill_frames as u64, Ordering::Relaxed);
         store_f64(&self.smoothed_fill, smoothed_fill);
         store_f64(&self.drift_ppm, drift_ppm);
         store_f64(&self.ratio, ratio);
@@ -244,6 +267,12 @@ impl EngineMetrics {
 
     pub fn fill_frames(&self) -> u64 {
         self.fill_frames.load(Ordering::Relaxed)
+    }
+
+    pub fn take_fill_range(&self) -> (u64, u64) {
+        let low = self.fill_low.swap(u64::MAX, Ordering::Relaxed);
+        let high = self.fill_high.swap(0, Ordering::Relaxed);
+        (low.min(high), high)
     }
 
     pub fn capacity_frames(&self) -> u64 {
@@ -334,6 +363,14 @@ impl EngineMetrics {
         self.device_queue_frames.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn record_host_silence(&self) {
+        self.host_silence.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn host_silence(&self) -> u64 {
+        self.host_silence.load(Ordering::Relaxed)
+    }
+
     pub fn device_starvations(&self) -> u64 {
         self.device_starvations.load(Ordering::Relaxed)
     }
@@ -375,7 +412,7 @@ mod tests {
     use super::*;
 
     fn metrics() -> EngineMetrics {
-        EngineMetrics::new(Arc::new(BridgeStats::default()))
+        EngineMetrics::new()
     }
 
     fn lost(detail: &str) -> Fault {
@@ -427,9 +464,9 @@ mod tests {
     #[test]
     fn device_starvation_is_counted_per_event() {
         let m = metrics();
-        m.publish_device(1920, false);
-        m.publish_device(480, true);
-        m.publish_device(960, true);
+        m.publish_device(1920, 960, false);
+        m.publish_device(480, 0, true);
+        m.publish_device(960, 0, true);
         assert_eq!(m.device_queue_frames(), 960);
         assert_eq!(m.device_starvations(), 2);
     }

@@ -4,4 +4,4 @@ pub mod ring;
 
 pub use clock::{DriftController, DriftTuning, RingLimit};
 pub use resample::{DriftResampler, ResampleError};
-pub use ring::{ring, BridgeStats, PullOutcome, PushOutcome, RingConsumer, RingProducer};
+pub use ring::{ring, BridgeStats, Counters, PullOutcome, PushOutcome, RingConsumer, RingProducer};

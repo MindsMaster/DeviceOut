@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use deviceout_core::ring;
-use deviceout_engine::{ring_capacity_frames, start, EngineConfig, EngineState};
+use deviceout_engine::{ring_capacity_for, start, EngineConfig, EngineState, SourceBus};
 use deviceout_sink::wasapi::{find_device_by_name, ComGuard};
 
 const DAW_BLOCK: usize = 512;
@@ -45,9 +45,10 @@ fn main() {
         ..Default::default()
     };
 
-    let capacity = ring_capacity_frames(source_rate, 400.0);
-    let (mut producer, consumer) = ring(capacity, channels);
-    let handle = start(consumer, config);
+    let (mut producer, consumer) = ring(ring_capacity_for(&config), channels);
+    let bus = Arc::new(SourceBus::default());
+    bus.join(consumer);
+    let handle = start(bus, config);
 
     let metrics = Arc::clone(handle.metrics());
     if let Some(reason) = metrics.last_error() {

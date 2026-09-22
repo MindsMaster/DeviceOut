@@ -164,6 +164,7 @@ impl Plugin for DeviceOut {
                 max_block_frames: buffer_config.max_buffer_size as usize,
                 device_queue_periods: queue_periods,
                 exclusive: *self.params.exclusive.read(),
+                trace_path: Some(deviceout_update::paths::engine_log_path()),
                 ..Default::default()
             },
             requested,
@@ -182,6 +183,7 @@ impl Plugin for DeviceOut {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         let Some(mut guard) = self.engine.producer().try_lock() else {
+            self.engine.note_host_drop();
             return ProcessStatus::Normal;
         };
         if let Some(producer) = guard.as_mut() {

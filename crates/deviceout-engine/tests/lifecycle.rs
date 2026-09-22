@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use deviceout_core::ring;
-use deviceout_engine::{ring_capacity_frames, start, EngineConfig, EngineState};
+use deviceout_engine::{ring_capacity_frames, start, EngineConfig, EngineState, SourceBus};
 
 const CHANNELS: usize = 2;
 const RATE: f64 = 48_000.0;
@@ -22,8 +24,7 @@ fn ring_capacity_follows_rate_and_duration() {
 
 #[test]
 fn a_missing_device_fails_visibly_instead_of_silently() {
-    let (_tx, rx) = ring(ring_capacity_frames(RATE, 400.0), CHANNELS);
-    let handle = start(rx, config());
+    let handle = start(Arc::new(SourceBus::default()), config());
 
     assert_eq!(handle.metrics().state(), EngineState::Failed);
     let reason = handle.metrics().last_error().expect("失败但未记录原因");
@@ -31,34 +32,36 @@ fn a_missing_device_fails_visibly_instead_of_silently() {
 }
 
 #[test]
-fn the_consumer_comes_back_even_when_startup_fails() {
-    let capacity = ring_capacity_frames(RATE, 400.0);
-    let (_tx, rx) = ring(capacity, CHANNELS);
+fn the_bus_outlives_the_engine_it_was_handed_to() {
+    let bus = Arc::new(SourceBus::default());
+    let (_tx, rx) = ring(ring_capacity_frames(RATE, 400.0), CHANNELS);
+    bus.join(rx);
 
-    let mut handle = start(rx, config());
-    let returned = handle.stop().expect("启动失败后读取端没有交回");
+    let mut handle = start(Arc::clone(&bus), config());
+    handle.stop();
 
-    assert_eq!(returned.channels(), CHANNELS);
-    assert_eq!(returned.capacity_frames(), capacity);
-
-    let mut handle = start(returned, config());
+    let handle = start(Arc::clone(&bus), config());
     assert_eq!(handle.metrics().state(), EngineState::Failed);
-    assert!(handle.stop().is_some());
+    assert!(Arc::strong_count(&bus) >= 2, "总线没有被第二台引擎接手");
 }
 
 #[test]
 fn stopping_twice_is_harmless() {
-    let (_tx, rx) = ring(ring_capacity_frames(RATE, 400.0), CHANNELS);
-    let mut handle = start(rx, config());
+    let mut handle = start(Arc::new(SourceBus::default()), config());
 
-    assert!(handle.stop().is_some());
-    assert!(handle.stop().is_none());
+    assert!(handle.stop());
+    assert!(!handle.stop());
 }
 
 #[test]
-fn a_channel_count_mismatch_is_caught_before_touching_the_device() {
-    let (_tx, rx) = ring(1024, 1);
-    let mut handle = start(rx, config());
+fn a_nonsense_config_is_refused_before_any_thread_starts() {
+    let handle = start(
+        Arc::new(SourceBus::default()),
+        EngineConfig {
+            channels: 0,
+            ..config()
+        },
+    );
 
     assert_eq!(handle.metrics().state(), EngineState::Failed);
     let reason = handle.metrics().last_error().expect("失败但未记录原因");
@@ -68,5 +71,4 @@ fn a_channel_count_mismatch_is_caught_before_touching_the_device() {
         "错误信息没提声道数: {}",
         reason.detail
     );
-    assert!(handle.stop().is_some());
 }

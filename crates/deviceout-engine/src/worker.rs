@@ -1,16 +1,16 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use deviceout_core::{
-    DriftController, DriftResampler, DriftTuning, PullOutcome, RingConsumer, RingLimit,
-};
+use deviceout_core::{DriftController, DriftResampler, DriftTuning, RingConsumer, RingLimit};
 use deviceout_sink::{AudioSink, SinkError, StreamFormat};
 
 use crate::error::{EngineError, Fault};
 use crate::metrics::{EngineMetrics, EngineState, StreamInfo};
+use crate::mixer::{Mixer, SourceBus, SourceId};
+use crate::trace::{Trace, TraceHeader};
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -25,6 +25,8 @@ pub struct EngineConfig {
     pub initial_drift_ppm: f64,
     pub prime_timeout_s: f64,
     pub tuning: DriftTuning,
+    pub trace_path: Option<std::path::PathBuf>,
+    pub host_drops: Option<&'static AtomicU64>,
 }
 
 impl Default for EngineConfig {
@@ -39,6 +41,8 @@ impl Default for EngineConfig {
             device_queue_periods: deviceout_sink::DEFAULT_QUEUE_PERIODS,
             exclusive: false,
             initial_drift_ppm: 0.0,
+            trace_path: None,
+            host_drops: None,
             prime_timeout_s: 5.0,
             tuning: DriftTuning::default(),
         }
@@ -91,6 +95,11 @@ pub fn ring_capacity_for_target(target_frames: usize) -> usize {
         .saturating_mul(CAPACITY_FACTOR)
         .max(MIN_CAPACITY_FRAMES)
         .next_power_of_two()
+}
+
+pub fn ring_capacity_for(config: &EngineConfig) -> usize {
+    let target = frames_for_ms(config.target_ms, config.source_rate_hz);
+    ring_capacity_for_target(target.max(config.max_block_frames))
 }
 
 fn settle_wait(config: &EngineConfig) -> f64 {
@@ -195,8 +204,9 @@ where
 #[derive(Debug)]
 pub struct EngineHandle {
     metrics: Arc<EngineMetrics>,
+    sources: Arc<SourceBus>,
     stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<RingConsumer>>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl EngineHandle {
@@ -204,9 +214,27 @@ impl EngineHandle {
         &self.metrics
     }
 
-    pub fn stop(&mut self) -> Option<RingConsumer> {
+    pub fn sources(&self) -> &Arc<SourceBus> {
+        &self.sources
+    }
+
+    pub fn attach(&self, consumer: RingConsumer) -> SourceId {
+        self.sources.join(consumer)
+    }
+
+    pub fn detach(&self, id: SourceId) {
+        self.sources.leave(id);
+    }
+
+    pub fn stop(&mut self) -> bool {
         self.stop.store(true, Ordering::Relaxed);
-        self.thread.take().and_then(|h| h.join().ok())
+        match self.thread.take() {
+            Some(thread) => {
+                let _ = thread.join();
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -217,8 +245,8 @@ impl Drop for EngineHandle {
 }
 
 #[cfg(windows)]
-pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
-    start_with(consumer, config, |cfg: &EngineConfig| {
+pub fn start(sources: Arc<SourceBus>, config: EngineConfig) -> EngineHandle {
+    start_with(sources, config, |cfg: &EngineConfig| {
         deviceout_sink::WasapiSink::open(
             &cfg.device_id,
             deviceout_sink::SinkOptions {
@@ -231,19 +259,20 @@ pub fn start(consumer: RingConsumer, config: EngineConfig) -> EngineHandle {
 }
 
 pub fn start_with<O: OpenSink>(
-    consumer: RingConsumer,
+    sources: Arc<SourceBus>,
     config: EngineConfig,
     open: O,
 ) -> EngineHandle {
-    let metrics = Arc::new(EngineMetrics::new(Arc::clone(consumer.stats())));
+    let metrics = Arc::new(EngineMetrics::new());
     let stop = Arc::new(AtomicBool::new(false));
 
-    if let Err(e) = validate(&consumer, &config) {
+    if let Err(e) = validate(&config) {
         metrics.set_failed(e.fault());
         return EngineHandle {
             metrics,
+            sources,
             stop,
-            thread: Some(spawn_idle(consumer)),
+            thread: None,
         };
     }
 
@@ -251,10 +280,11 @@ pub fn start_with<O: OpenSink>(
 
     let thread = {
         let metrics = Arc::clone(&metrics);
+        let sources = Arc::clone(&sources);
         let stop = Arc::clone(&stop);
         thread::Builder::new()
             .name("deviceout-output".into())
-            .spawn(move || run(config, open, consumer, metrics, stop, ready_tx))
+            .spawn(move || run(config, open, sources, metrics, stop, ready_tx))
     };
 
     match thread {
@@ -262,6 +292,7 @@ pub fn start_with<O: OpenSink>(
             let _ = ready_rx.recv();
             EngineHandle {
                 metrics,
+                sources,
                 stop,
                 thread: Some(thread),
             }
@@ -270,6 +301,7 @@ pub fn start_with<O: OpenSink>(
             metrics.set_failed(Fault::thread(format!("无法创建输出线程: {e}")));
             EngineHandle {
                 metrics,
+                sources,
                 stop,
                 thread: None,
             }
@@ -277,16 +309,9 @@ pub fn start_with<O: OpenSink>(
     }
 }
 
-fn validate(consumer: &RingConsumer, config: &EngineConfig) -> Result<(), EngineError> {
+fn validate(config: &EngineConfig) -> Result<(), EngineError> {
     if config.channels == 0 {
         return Err(EngineError::Config("声道数必须为正".into()));
-    }
-    if consumer.channels() != config.channels {
-        return Err(EngineError::Config(format!(
-            "环形缓冲是 {} 声道，配置写的是 {} 声道",
-            consumer.channels(),
-            config.channels
-        )));
     }
     if !config.source_rate_hz.is_finite() || config.source_rate_hz <= 0.0 {
         return Err(EngineError::Config("DAW 侧采样率必须是有限正数".into()));
@@ -295,10 +320,6 @@ fn validate(consumer: &RingConsumer, config: &EngineConfig) -> Result<(), Engine
         return Err(EngineError::Config("目标延迟必须是有限正数".into()));
     }
     Ok(())
-}
-
-fn spawn_idle(consumer: RingConsumer) -> JoinHandle<RingConsumer> {
-    thread::spawn(move || consumer)
 }
 
 fn backoff_delay(attempt: u32) -> Duration {
@@ -329,35 +350,53 @@ fn signal_ready(ready: &mut Option<mpsc::Sender<()>>) {
 fn run<O: OpenSink>(
     config: EngineConfig,
     mut open: O,
-    mut rx: RingConsumer,
+    sources: Arc<SourceBus>,
     metrics: Arc<EngineMetrics>,
     stop: Arc<AtomicBool>,
     ready: mpsc::Sender<()>,
-) -> RingConsumer {
+) {
     #[cfg(windows)]
     let _priority = deviceout_sink::AudioPriority::raise_current_thread().ok();
 
+    let mut mixer = Mixer::new(
+        Arc::clone(&sources),
+        Arc::clone(metrics.stats()),
+        config.channels,
+    );
     let mut ready = Some(ready);
     let mut saw_device_loss = false;
     let mut attempt = 0u32;
+    let mut trace: Option<Trace> = None;
 
     while !stop.load(Ordering::Relaxed) {
         let opened = open
             .open(&config)
             .map_err(EngineError::from)
-            .and_then(|sink| Worker::new(sink, &config, &rx, &metrics));
+            .and_then(|sink| Worker::new(sink, &config, &metrics));
         match opened {
             Ok(mut worker) => {
                 if saw_device_loss {
                     metrics.record_reconnect();
                     attempt = 0;
                 }
+                if trace.is_none() {
+                    if let Some(path) = config.trace_path.clone() {
+                        trace = Some(Trace::spawn(
+                            path,
+                            worker.trace.clone(),
+                            Arc::clone(&metrics),
+                            Arc::clone(&sources),
+                            config.host_drops,
+                        ));
+                    }
+                }
+                mixer.reserve(worker.pull_buf.len());
                 signal_ready(&mut ready);
 
-                match worker.run(&mut rx, &metrics, &stop) {
+                match worker.run(&mut mixer, &metrics, &stop) {
                     Ok(()) => {
                         metrics.set_state(EngineState::Stopped);
-                        return rx;
+                        return;
                     }
                     Err(e) if e.is_recoverable() => {
                         metrics.set_reconnecting(e.fault());
@@ -365,7 +404,7 @@ fn run<O: OpenSink>(
                     }
                     Err(e) => {
                         metrics.set_failed(e.fault());
-                        return rx;
+                        return;
                     }
                 }
             }
@@ -378,7 +417,7 @@ fn run<O: OpenSink>(
             Err(e) => {
                 metrics.set_failed(e.fault());
                 signal_ready(&mut ready);
-                return rx;
+                return;
             }
         }
 
@@ -389,7 +428,6 @@ fn run<O: OpenSink>(
     }
 
     metrics.set_state(EngineState::Stopped);
-    rx
 }
 
 struct Worker<S: AudioSink> {
@@ -406,15 +444,11 @@ struct Worker<S: AudioSink> {
     prime_timeout_s: f64,
     target_frames: f64,
     settle: SettleWatch,
+    trace: TraceHeader,
 }
 
 impl<S: AudioSink> Worker<S> {
-    fn new(
-        sink: S,
-        config: &EngineConfig,
-        rx: &RingConsumer,
-        metrics: &EngineMetrics,
-    ) -> Result<Self, EngineError> {
+    fn new(sink: S, config: &EngineConfig, metrics: &EngineMetrics) -> Result<Self, EngineError> {
         let format = sink.format();
         let channels = format.channels as usize;
         if channels != config.channels {
@@ -432,10 +466,11 @@ impl<S: AudioSink> Worker<S> {
         let resampler =
             DriftResampler::new(channels, period_frames, nominal_ratio, &config.tuning)?;
         let downstream_frames = sink.queue_limit_frames() + resampler.output_delay();
+        let capacity_frames = ring_capacity_for(config);
         let level = target_level(
             config,
             period_source_frames,
-            rx.capacity_frames(),
+            capacity_frames,
             ms_of(downstream_frames, sink_rate),
         );
         let target_frames = level.frames;
@@ -451,7 +486,7 @@ impl<S: AudioSink> Worker<S> {
             sink_rate_hz: sink_rate,
             period_frames,
             channels,
-            capacity_frames: rx.capacity_frames(),
+            capacity_frames,
             resampler_delay_frames: resampler.output_delay(),
             min_period_frames: sink.min_period_frames(),
             exclusive: sink.exclusive(),
@@ -462,6 +497,25 @@ impl<S: AudioSink> Worker<S> {
             level.total_floor_ms,
             settle_wait(config),
         );
+
+        let trace = TraceHeader {
+            device_id: config.device_id.clone(),
+            source_rate_hz: config.source_rate_hz,
+            sink_rate_hz: sink_rate,
+            channels,
+            max_block_frames: config.max_block_frames,
+            period_frames,
+            min_period_frames: sink.min_period_frames(),
+            queue_periods: config.device_queue_periods,
+            exclusive: sink.exclusive(),
+            target_ms: config.target_ms,
+            target_frames,
+            floor_frames: level.floor,
+            capacity_frames,
+            resampler_delay_frames: resampler.output_delay(),
+            device_buffer_frames: sink.buffer_frames(),
+            queue_limit_frames: sink.queue_limit_frames(),
+        };
 
         Ok(Self {
             sink,
@@ -477,27 +531,20 @@ impl<S: AudioSink> Worker<S> {
             prime_timeout_s: config.prime_timeout_s,
             target_frames,
             settle: SettleWatch::new(settle_wait(config), config.initial_drift_ppm),
+            trace,
         })
     }
 
-    fn trim_backlog(&self, rx: &mut RingConsumer) -> usize {
-        let fill = rx.available_frames();
-        let target = self.target_frames as usize;
-        if fill <= target {
-            return 0;
-        }
-        rx.discard(fill - target)
-    }
-
-    fn prime(&self, rx: &RingConsumer, metrics: &EngineMetrics, stop: &AtomicBool) {
+    fn prime(&self, mixer: &mut Mixer, metrics: &EngineMetrics, stop: &AtomicBool) {
         metrics.set_state(EngineState::Priming);
         let deadline = Instant::now() + Duration::from_secs_f64(self.prime_timeout_s);
 
         let mut step = 0usize;
-        let mut last = rx.available_frames();
+        let mut last = 0usize;
 
         loop {
-            let fill = rx.available_frames();
+            mixer.sync();
+            let fill = mixer.fill();
             step = step.max(fill.saturating_sub(last));
             last = fill;
 
@@ -515,15 +562,15 @@ impl<S: AudioSink> Worker<S> {
 
     fn run(
         &mut self,
-        rx: &mut RingConsumer,
+        mixer: &mut Mixer,
         metrics: &EngineMetrics,
         stop: &AtomicBool,
     ) -> Result<(), EngineError> {
-        self.prime(rx, metrics, stop);
+        self.prime(mixer, metrics, stop);
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let discarded = self.trim_backlog(rx);
+        let discarded = mixer.trim(self.target_frames as usize);
         if discarded > 0 {
             metrics.record_discard(discarded);
         }
@@ -543,27 +590,29 @@ impl<S: AudioSink> Worker<S> {
                 )));
             }
 
-            let outcome = rx.pull(&mut self.pull_buf[..samples]);
+            let mix = mixer.pull(
+                &mut self.pull_buf[..samples],
+                self.dt_s,
+                self.target_frames as usize,
+            );
             self.resampler
                 .process(&self.pull_buf[..samples], &mut self.out_buf)?;
 
             let report = self.sink.write(&self.out_buf)?;
 
-            let fill = rx.available_frames();
+            if mix.limit == RingLimit::Dry {
+                metrics.record_host_silence();
+            }
             period += 1;
             if period > self.warmup_periods {
-                let limit = match outcome {
-                    PullOutcome::Underrun { .. } => RingLimit::Empty,
-                    PullOutcome::Ok => RingLimit::Free,
-                };
-                self.ctrl.update(fill as f64, self.dt_s, limit);
+                self.ctrl.update(mix.fill as f64, self.dt_s, mix.limit);
                 self.resampler.set_ratio(self.ctrl.ratio());
             }
 
             let elapsed = period as f64 * self.dt_s;
             let drift = self.ctrl.drift_ppm();
             metrics.publish(
-                fill,
+                mix.fill,
                 self.ctrl.smoothed_fill(),
                 drift,
                 self.resampler.ratio(),
@@ -571,7 +620,7 @@ impl<S: AudioSink> Worker<S> {
                 elapsed,
             );
             metrics.set_settled(self.settle.update(drift, elapsed));
-            metrics.publish_device(report.queued_frames, report.starved);
+            metrics.publish_device(report.queued_frames, report.thinnest_frames, report.starved);
         }
 
         self.sink.stop()?;
@@ -712,10 +761,21 @@ mod tests {
 
     #[test]
     fn a_broken_target_is_refused_not_clamped() {
-        let (_tx, rx) = deviceout_core::ring(4_096, 2);
-        assert!(validate(&rx, &cfg(0.0, 512)).is_err());
-        assert!(validate(&rx, &cfg(f64::NAN, 512)).is_err());
-        assert!(validate(&rx, &cfg(30.0, 512)).is_ok());
+        assert!(validate(&cfg(0.0, 512)).is_err());
+        assert!(validate(&cfg(f64::NAN, 512)).is_err());
+        assert!(validate(&cfg(30.0, 512)).is_ok());
+        assert!(validate(&EngineConfig {
+            channels: 0,
+            ..cfg(30.0, 512)
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn the_ring_is_sized_from_the_config_alone() {
+        assert_eq!(ring_capacity_for(&cfg(30.0, 512)), 8_192);
+        assert_eq!(ring_capacity_for(&cfg(120.0, 512)), 32_768);
+        assert_eq!(ring_capacity_for(&cfg(1.0, 16_384)), 65_536);
     }
 
     #[test]

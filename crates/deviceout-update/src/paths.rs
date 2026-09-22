@@ -34,6 +34,10 @@ pub fn feedback_log_path() -> PathBuf {
     appdata_dir().join("feedback.log")
 }
 
+pub fn engine_log_path() -> PathBuf {
+    appdata_dir().join("engine.log")
+}
+
 pub fn panic_log_path() -> PathBuf {
     appdata_dir().join("panic.log")
 }
