@@ -1,7 +1,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use deviceout_core::{ring, DriftController, DriftResampler, DriftTuning};
+use deviceout_core::{ring, DriftController, DriftResampler, DriftTuning, PullOutcome, RingLimit};
 
 struct CountingAllocator;
 
@@ -70,9 +70,13 @@ fn the_hot_path_never_allocates() {
 
         let need = resampler.input_frames_next();
         let samples = need * CHANNELS;
-        rx.pull(&mut pull_buf[..samples]);
+        let outcome = rx.pull(&mut pull_buf[..samples]);
         let consumed = resampler.process(&pull_buf[..samples], &mut out_buf);
-        ctrl.update(rx.available_frames() as f64, sink_period);
+        let limit = match outcome {
+            PullOutcome::Underrun { .. } => RingLimit::Empty,
+            PullOutcome::Ok => RingLimit::Free,
+        };
+        ctrl.update(rx.available_frames() as f64, sink_period, limit);
         resampler.set_ratio(ctrl.ratio());
 
         let _ = rx.stats().underrun_events();

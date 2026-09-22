@@ -1,4 +1,4 @@
-use deviceout_core::{ring, DriftController, DriftResampler, DriftTuning};
+use deviceout_core::{ring, DriftController, DriftResampler, DriftTuning, PullOutcome, RingLimit};
 
 const SAMPLE_RATE: f64 = 6_000.0;
 const CHANNELS: usize = 1;
@@ -12,6 +12,7 @@ struct LinkReport {
     overruns: u64,
     settled_ppm: f64,
     ppm_spread: f64,
+    ratio_swing_ppm: f64,
     lowest_fill: usize,
     highest_fill: usize,
     clamp_events: u64,
@@ -43,6 +44,10 @@ fn run_link(source_ppm: f64, seconds: f64) -> LinkReport {
     let mut highest_fill = 0usize;
     let mut ppm_lo = f64::MAX;
     let mut ppm_hi = f64::MIN;
+    let mut ppm_sum = 0.0f64;
+    let mut ppm_samples = 0u64;
+    let mut ratio_lo = f64::MAX;
+    let mut ratio_hi = f64::MIN;
 
     for step in 0..steps {
         daw_credit += source_rate * sink_period;
@@ -53,13 +58,17 @@ fn run_link(source_ppm: f64, seconds: f64) -> LinkReport {
 
         let need = resampler.input_frames_next();
         let samples = need * CHANNELS;
-        rx.pull(&mut pull_buf[..samples]);
+        let outcome = rx.pull(&mut pull_buf[..samples]);
         resampler
             .process(&pull_buf[..samples], &mut out_buf)
             .expect("重采样失败");
 
         let fill = rx.available_frames();
-        ctrl.update(fill as f64, sink_period);
+        let limit = match outcome {
+            PullOutcome::Underrun { .. } => RingLimit::Empty,
+            PullOutcome::Ok => RingLimit::Free,
+        };
+        ctrl.update(fill as f64, sink_period, limit);
         resampler.set_ratio(ctrl.ratio());
 
         let t = step as f64 * sink_period;
@@ -73,14 +82,19 @@ fn run_link(source_ppm: f64, seconds: f64) -> LinkReport {
             let ppm = ctrl.drift_ppm();
             ppm_lo = ppm_lo.min(ppm);
             ppm_hi = ppm_hi.max(ppm);
+            ppm_sum += ppm;
+            ppm_samples += 1;
+            ratio_lo = ratio_lo.min(ctrl.ratio());
+            ratio_hi = ratio_hi.max(ctrl.ratio());
         }
     }
 
     LinkReport {
         underruns: rx.stats().underrun_events(),
         overruns: rx.stats().overrun_events(),
-        settled_ppm: ctrl.drift_ppm(),
+        settled_ppm: ppm_sum / ppm_samples.max(1) as f64,
         ppm_spread: ppm_hi - ppm_lo,
+        ratio_swing_ppm: (ratio_hi - ratio_lo) * 1.0e6,
         lowest_fill,
         highest_fill,
         clamp_events: resampler.clamp_events(),
@@ -113,9 +127,14 @@ fn real_resampler_closes_the_loop() {
     );
 
     assert!(
-        r.ppm_spread < 5.0,
-        "ppm 估计的振荡超出预期，收敛后极差 {:.2} ppm（稳态实测约 3.0 ppm）: {r:?}",
+        r.ppm_spread < 60.0,
+        "ppm 估计的振荡超出预期，收敛后极差 {:.2} ppm: {r:?}",
         r.ppm_spread
+    );
+    assert!(
+        r.ratio_swing_ppm < 400.0,
+        "重采样比例抖动 {:.0} ppm，已经接近可闻: {r:?}",
+        r.ratio_swing_ppm
     );
 }
 

@@ -9,7 +9,7 @@ pub struct DriftTuning {
 impl Default for DriftTuning {
     fn default() -> Self {
         Self {
-            settle_time_s: 60.0,
+            settle_time_s: 20.0,
             damping: 1.0,
             lowpass_tau_s: 3.0,
             max_correction: 0.02,
@@ -18,6 +18,14 @@ impl Default for DriftTuning {
 }
 
 const LOWPASS_BANDWIDTH_RATIO: f64 = 5.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RingLimit {
+    Free,
+    Empty,
+    Full,
+    Dry,
+}
 
 fn max_lowpass_tau_s(wn: f64) -> f64 {
     1.0 / (LOWPASS_BANDWIDTH_RATIO * wn)
@@ -78,8 +86,12 @@ impl DriftController {
         }
     }
 
-    pub fn update(&mut self, fill_frames: f64, dt_s: f64) -> f64 {
+    pub fn update(&mut self, fill_frames: f64, dt_s: f64, limit: RingLimit) -> f64 {
         debug_assert!(dt_s > 0.0);
+
+        if limit == RingLimit::Dry {
+            return self.ratio();
+        }
 
         if !self.primed {
             self.filtered_fill = fill_frames;
@@ -93,14 +105,31 @@ impl DriftController {
 
         let integral_candidate =
             (self.integral + err_norm * dt_s).clamp(-self.integral_limit, self.integral_limit);
-        let raw = self.kp * err_norm + self.ki * integral_candidate;
+        let mut raw = self.kp * err_norm + self.ki * integral_candidate;
 
         if raw.abs() < self.max_correction {
             self.integral = integral_candidate;
         }
 
+        if self.disproved_by(limit, raw) {
+            self.integral =
+                (-self.kp * err_norm / self.ki).clamp(-self.integral_limit, self.integral_limit);
+            raw = self.kp * err_norm + self.ki * self.integral;
+        }
+
         self.correction = raw.clamp(-self.max_correction, self.max_correction);
         self.ratio()
+    }
+
+    fn disproved_by(&self, limit: RingLimit, raw: f64) -> bool {
+        if self.ki <= 0.0 {
+            return false;
+        }
+        match limit {
+            RingLimit::Free | RingLimit::Dry => false,
+            RingLimit::Empty => raw > 0.0,
+            RingLimit::Full => raw < 0.0,
+        }
     }
 
     #[inline]
@@ -158,6 +187,8 @@ mod tests {
     const BLOCK: f64 = 480.0;
     const CAPACITY: f64 = 19_200.0;
     const TARGET: f64 = CAPACITY / 2.0;
+    const SHALLOW_TARGET: f64 = 1_790.0;
+    const SHALLOW_CAPACITY: f64 = 8_192.0;
 
     #[derive(Debug)]
     struct SimResult {
@@ -174,9 +205,21 @@ mod tests {
     }
 
     fn simulate_at(target: f64, capacity: f64, ppm: f64, secs: f64, controlled: bool) -> SimResult {
+        simulate_seeded(target, capacity, ppm, 0.0, secs, controlled)
+    }
+
+    fn simulate_seeded(
+        target: f64,
+        capacity: f64,
+        ppm: f64,
+        seed_ppm: f64,
+        secs: f64,
+        controlled: bool,
+    ) -> SimResult {
         let source_rate = SINK_RATE * (1.0 + ppm * 1.0e-6);
         let dt = BLOCK / SINK_RATE;
         let mut ctrl = DriftController::new(target, SINK_RATE, 1.0, DriftTuning::default());
+        ctrl.seed_drift_ppm(seed_ppm);
 
         let mut fill = target;
         let (mut underruns, mut overruns) = (0u32, 0u32);
@@ -184,10 +227,13 @@ mod tests {
         let warmup = (2.0 / dt) as usize;
 
         for step in 0..(secs / dt) as usize {
+            let mut limit = RingLimit::Free;
+
             fill += source_rate * dt;
             if fill > capacity {
                 overruns += 1;
                 fill = capacity;
+                limit = RingLimit::Full;
             }
 
             let ratio = if controlled { ctrl.ratio() } else { 1.0 };
@@ -195,12 +241,13 @@ mod tests {
             if fill < needed {
                 underruns += 1;
                 fill = 0.0;
+                limit = RingLimit::Empty;
             } else {
                 fill -= needed;
             }
 
             if controlled {
-                ctrl.update(fill, dt);
+                ctrl.update(fill, dt, limit);
             }
 
             if step > warmup {
@@ -240,6 +287,67 @@ mod tests {
                 "{ppm} ppm 未被跟踪上: {r:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_seed_the_run_disproves_is_dropped_within_seconds() {
+        let r = simulate_seeded(SHALLOW_TARGET, SHALLOW_CAPACITY, 0.0, 12_911.0, 600.0, true);
+        assert!(r.underruns <= 4, "错误的种子仍在持续掏空环形缓冲: {r:?}");
+        assert!(r.settled_ppm.abs() < 100.0, "种子始终没有被纠正: {r:?}");
+    }
+
+    #[test]
+    fn the_shallow_ring_the_plugin_uses_survives_a_seed_pointing_the_wrong_way() {
+        for (real, seed) in [(0.0, 8_000.0), (100.0, 12_911.0), (-1_000.0, 8_000.0)] {
+            let r = simulate_seeded(SHALLOW_TARGET, SHALLOW_CAPACITY, real, seed, 600.0, true);
+            assert!(
+                r.underruns < 200,
+                "真实 {real} ppm 配上 {seed} ppm 的种子仍然崩了: {r:?}"
+            );
+            assert!(
+                (r.settled_ppm - real).abs() < real.abs() * 0.05 + 100.0,
+                "真实 {real} ppm 未被跟踪上: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_silent_host_teaches_the_estimate_nothing() {
+        let mut ctrl = DriftController::new(SHALLOW_TARGET, SINK_RATE, 1.0, DriftTuning::default());
+        let dt = BLOCK / SINK_RATE;
+
+        for _ in 0..600 {
+            ctrl.update(SHALLOW_TARGET * 0.4, dt, RingLimit::Free);
+        }
+        let learned = ctrl.drift_ppm();
+        assert!(learned < -1.0, "没有先学到东西，测不出冻结: {learned}");
+
+        for _ in 0..400 {
+            ctrl.update(0.0, dt, RingLimit::Dry);
+        }
+        assert!(
+            (ctrl.drift_ppm() - learned).abs() < 1.0e-9,
+            "源断供期间估计被改写了: {learned} -> {}",
+            ctrl.drift_ppm()
+        );
+    }
+
+    #[test]
+    fn an_empty_ring_overrules_whatever_the_integral_believes() {
+        let mut ctrl = DriftController::new(SHALLOW_TARGET, SINK_RATE, 1.0, DriftTuning::default());
+        ctrl.seed_drift_ppm(12_911.0);
+        let dt = BLOCK / SINK_RATE;
+        let barely = SHALLOW_TARGET * 0.5;
+
+        ctrl.update(barely, dt, RingLimit::Free);
+        assert!(ctrl.correction_ppm() > 0.0, "尚未见底就不该清掉修正");
+
+        ctrl.update(barely, dt, RingLimit::Empty);
+        assert!(
+            ctrl.correction_ppm() <= 1.0,
+            "见底之后仍在加速消费: {} ppm",
+            ctrl.correction_ppm()
+        );
     }
 
     #[test]
@@ -394,7 +502,7 @@ mod tests {
             let mut worst: f64 = 0.0;
             for _ in 0..(30.0 / dt) as usize {
                 fill += source_rate * dt - BLOCK / ctrl.ratio();
-                ctrl.update(fill, dt);
+                ctrl.update(fill, dt, RingLimit::Free);
                 worst = worst.max((fill - 1_440.0).abs());
             }
             worst
@@ -413,7 +521,7 @@ mod tests {
         let tuning = DriftTuning::default();
         let mut ctrl = DriftController::new(TARGET, SINK_RATE, 1.0, tuning);
         for _ in 0..100_000 {
-            ctrl.update(CAPACITY, BLOCK / SINK_RATE);
+            ctrl.update(CAPACITY, BLOCK / SINK_RATE, RingLimit::Free);
         }
         let r = ctrl.ratio();
         assert!(
@@ -422,7 +530,7 @@ mod tests {
         );
 
         for _ in 0..100_000 {
-            ctrl.update(TARGET, BLOCK / SINK_RATE);
+            ctrl.update(TARGET, BLOCK / SINK_RATE, RingLimit::Free);
         }
         assert!(
             (1.0 - ctrl.ratio()).abs() < tuning.max_correction,

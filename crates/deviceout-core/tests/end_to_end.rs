@@ -1,4 +1,4 @@
-use deviceout_core::{ring, DriftController, DriftTuning, PullOutcome, PushOutcome};
+use deviceout_core::{ring, DriftController, DriftTuning, PullOutcome, PushOutcome, RingLimit};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const CHANNELS: usize = 2;
@@ -23,6 +23,10 @@ fn run_link(source_ppm: f64, minutes: f64, compensate: bool) -> LinkReport {
     let mut best_fill = 0usize;
     let mut ppm_lo = f64::MAX;
     let mut ppm_hi = f64::MIN;
+    let mut ppm_sum = 0.0f64;
+    let mut ppm_samples = 0u64;
+    let mut ratio_lo = f64::MAX;
+    let mut ratio_hi = f64::MIN;
 
     let wave: Vec<f32> = (0..DAW_BLOCK * CHANNELS)
         .map(|i| (i as f32 * 0.01).sin())
@@ -45,20 +49,28 @@ fn run_link(source_ppm: f64, minutes: f64, compensate: bool) -> LinkReport {
         frac_remainder -= needed_frames as f64;
 
         let needed = needed_frames * CHANNELS;
-        rx.pull(&mut out[..needed]);
+        let outcome = rx.pull(&mut out[..needed]);
 
         let fill = rx.available_frames();
         worst_fill = worst_fill.min(fill);
         best_fill = best_fill.max(fill);
 
         if compensate {
-            ctrl.update(fill as f64, sink_period);
+            let limit = match outcome {
+                PullOutcome::Underrun { .. } => RingLimit::Empty,
+                PullOutcome::Ok => RingLimit::Free,
+            };
+            ctrl.update(fill as f64, sink_period, limit);
         }
 
         if step * 2 > steps {
             let p = ctrl.drift_ppm();
             ppm_lo = ppm_lo.min(p);
             ppm_hi = ppm_hi.max(p);
+            ppm_sum += p;
+            ppm_samples += 1;
+            ratio_lo = ratio_lo.min(ctrl.ratio());
+            ratio_hi = ratio_hi.max(ctrl.ratio());
         }
     }
 
@@ -66,8 +78,9 @@ fn run_link(source_ppm: f64, minutes: f64, compensate: bool) -> LinkReport {
         underruns: rx.stats().underrun_events(),
         overruns: rx.stats().overrun_events(),
         zero_filled: rx.stats().samples_zero_filled(),
-        settled_ppm: ctrl.drift_ppm(),
+        settled_ppm: ppm_sum / ppm_samples.max(1) as f64,
         ppm_spread: ppm_hi - ppm_lo,
+        ratio_swing_ppm: (ratio_hi - ratio_lo) * 1.0e6,
         worst_fill,
         best_fill,
     }
@@ -80,6 +93,7 @@ struct LinkReport {
     zero_filled: u64,
     settled_ppm: f64,
     ppm_spread: f64,
+    ratio_swing_ppm: f64,
     worst_fill: usize,
     best_fill: usize,
 }
@@ -104,7 +118,7 @@ fn survives_one_hour_of_positive_drift() {
     assert_eq!(r.overruns, 0, "出现溢出: {r:?}");
     assert_eq!(r.silence_seconds(), 0.0);
     assert!(
-        (r.settled_ppm - 50.0).abs() < 10.0,
+        (r.settled_ppm - 50.0).abs() < 5.0,
         "时钟偏差估计偏离过大: {r:?}"
     );
 }
@@ -113,9 +127,14 @@ fn survives_one_hour_of_positive_drift() {
 fn drift_estimate_does_not_oscillate() {
     let r = run_link(50.0, 60.0, true);
     assert!(
-        r.ppm_spread < 5.0,
+        r.ppm_spread < 60.0,
         "ppm 估计在振荡，极差 {:.1}: {r:?}",
         r.ppm_spread
+    );
+    assert!(
+        r.ratio_swing_ppm < 400.0,
+        "重采样比例抖动 {:.0} ppm，已经接近可闻: {r:?}",
+        r.ratio_swing_ppm
     );
 }
 

@@ -1,4 +1,4 @@
-use deviceout_core::{ring, DriftController, DriftTuning};
+use deviceout_core::{ring, DriftController, DriftTuning, PullOutcome, RingLimit};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const CHANNELS: usize = 2;
@@ -54,11 +54,15 @@ fn main() {
         frac_remainder += SINK_BLOCK as f64 / ratio;
         let needed_frames = frac_remainder.floor() as usize;
         frac_remainder -= needed_frames as f64;
-        rx.pull(&mut out[..needed_frames * CHANNELS]);
+        let outcome = rx.pull(&mut out[..needed_frames * CHANNELS]);
         consumed_total += needed_frames as u64;
 
         let fill = rx.available_frames();
-        ctrl.update(fill as f64, sink_period);
+        let limit = match outcome {
+            PullOutcome::Underrun { .. } => RingLimit::Empty,
+            PullOutcome::Ok => RingLimit::Free,
+        };
+        ctrl.update(fill as f64, sink_period, limit);
 
         let t = step as f64 * sink_period;
         let hit = if t < 30.0 {

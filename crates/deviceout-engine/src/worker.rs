@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use deviceout_core::{DriftController, DriftResampler, DriftTuning, RingConsumer};
+use deviceout_core::{
+    DriftController, DriftResampler, DriftTuning, PullOutcome, RingConsumer, RingLimit,
+};
 use deviceout_sink::{AudioSink, SinkError, StreamFormat};
 
 use crate::error::{EngineError, Fault};
@@ -541,7 +543,7 @@ impl<S: AudioSink> Worker<S> {
                 )));
             }
 
-            rx.pull(&mut self.pull_buf[..samples]);
+            let outcome = rx.pull(&mut self.pull_buf[..samples]);
             self.resampler
                 .process(&self.pull_buf[..samples], &mut self.out_buf)?;
 
@@ -550,7 +552,11 @@ impl<S: AudioSink> Worker<S> {
             let fill = rx.available_frames();
             period += 1;
             if period > self.warmup_periods {
-                self.ctrl.update(fill as f64, self.dt_s);
+                let limit = match outcome {
+                    PullOutcome::Underrun { .. } => RingLimit::Empty,
+                    PullOutcome::Ok => RingLimit::Free,
+                };
+                self.ctrl.update(fill as f64, self.dt_s, limit);
                 self.resampler.set_ratio(self.ctrl.ratio());
             }
 

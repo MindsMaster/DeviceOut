@@ -1,4 +1,4 @@
-use deviceout_core::{ring, DriftController, DriftResampler, DriftTuning};
+use deviceout_core::{ring, DriftController, DriftResampler, DriftTuning, PullOutcome, RingLimit};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const CHANNELS: usize = 2;
@@ -71,13 +71,17 @@ fn main() {
 
         let need = resampler.input_frames_next();
         let samples = need * CHANNELS;
-        rx.pull(&mut pull_buf[..samples]);
+        let outcome = rx.pull(&mut pull_buf[..samples]);
         resampler
             .process(&pull_buf[..samples], &mut out_buf)
             .expect("重采样失败");
 
         let fill = rx.available_frames();
-        ctrl.update(fill as f64, sink_period);
+        let limit = match outcome {
+            PullOutcome::Underrun { .. } => RingLimit::Empty,
+            PullOutcome::Ok => RingLimit::Free,
+        };
+        ctrl.update(fill as f64, sink_period, limit);
         resampler.set_ratio(ctrl.ratio());
 
         let drift = ctrl.drift_ppm();
