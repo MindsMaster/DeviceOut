@@ -8,11 +8,11 @@ use deviceout_engine::{
     min_total_ms, ring_capacity_for, start, EngineConfig, EngineHandle, EngineMetrics, SourceBus,
 };
 
-pub(crate) const DEFAULT_TARGET_MS: u32 = 30;
+pub(crate) const DEFAULT_TARGET_MS: u32 = 80;
 pub(crate) const MAX_TARGET_MS: u32 = 1_000;
 pub(crate) const TARGET_MS_STEPS: &[u32] = &[10, 20, 30, 40, 50, 60, 80, 120, 200];
 pub(crate) const QUEUE_PERIOD_STEPS: &[u32] = &[1, 2, 3, 4];
-pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 2;
+pub(crate) const DEFAULT_QUEUE_PERIODS: u32 = 4;
 
 const UNATTACHED: u64 = 0;
 
@@ -405,6 +405,15 @@ mod tests {
         assert_eq!(clamp_queue_periods(0), 1);
         assert_eq!(clamp_queue_periods(3), 3);
         assert_eq!(clamp_queue_periods(99), 4);
-        assert_eq!(clamp_queue_periods(DEFAULT_QUEUE_PERIODS), 2);
+        assert_eq!(clamp_queue_periods(DEFAULT_QUEUE_PERIODS), 4);
+    }
+
+    #[test]
+    fn the_shipped_default_clears_the_floor_it_ships_with() {
+        let floor = min_target_ms(512, 48_000.0, DEFAULT_QUEUE_PERIODS);
+        assert_eq!(floor, 64);
+        assert_eq!(clamp_target_ms(DEFAULT_TARGET_MS, floor), DEFAULT_TARGET_MS);
+        assert!(TARGET_MS_STEPS.contains(&DEFAULT_TARGET_MS));
+        assert!(QUEUE_PERIOD_STEPS.contains(&DEFAULT_QUEUE_PERIODS));
     }
 }

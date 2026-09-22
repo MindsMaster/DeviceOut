@@ -37,7 +37,7 @@ impl Default for EngineConfig {
             channels: 2,
             max_block_frames: DEFAULT_BLOCK_FRAMES,
             target_ms: DEFAULT_TARGET_MS,
-            device_buffer_ms: 40,
+            device_buffer_ms: 80,
             device_queue_periods: deviceout_sink::DEFAULT_QUEUE_PERIODS,
             exclusive: false,
             initial_drift_ppm: 0.0,
@@ -49,7 +49,7 @@ impl Default for EngineConfig {
     }
 }
 
-pub const DEFAULT_TARGET_MS: f64 = 30.0;
+pub const DEFAULT_TARGET_MS: f64 = 80.0;
 pub const DEFAULT_BLOCK_FRAMES: usize = 512;
 
 pub const ASSUMED_PERIOD_MS: f64 = 10.0;

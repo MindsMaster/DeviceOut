@@ -20,7 +20,7 @@ const WAIT_TIMEOUT_MS: u32 = 2000;
 
 pub const MIN_QUEUE_PERIODS: u32 = 1;
 pub const MAX_QUEUE_PERIODS: u32 = 4;
-pub const DEFAULT_QUEUE_PERIODS: u32 = 2;
+pub const DEFAULT_QUEUE_PERIODS: u32 = 4;
 
 const HNS_PER_SECOND: f64 = 1.0e7;
 
@@ -34,7 +34,7 @@ pub struct SinkOptions {
 impl Default for SinkOptions {
     fn default() -> Self {
         Self {
-            buffer_ms: 40,
+            buffer_ms: 80,
             queue_periods: DEFAULT_QUEUE_PERIODS,
             exclusive: false,
         }
