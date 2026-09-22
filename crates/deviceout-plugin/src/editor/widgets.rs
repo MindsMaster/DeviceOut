@@ -482,7 +482,8 @@ pub(crate) fn number_combo(
             ),
             Pos2::new(rect.right(), rect.bottom() + 5.0),
         );
-        ui.scope(|ui| {
+        let mut ui = ui.new_child(egui::UiBuilder::new());
+        {
             let style = ui.style_mut();
             style.spacing.menu_margin = egui::Margin::same(6);
             style.visuals.window_fill = theme::MENU;
@@ -495,7 +496,7 @@ pub(crate) fn number_combo(
                 color: Color32::from_black_alpha(100),
             };
             egui::popup::popup_above_or_below_widget(
-                ui,
+                &ui,
                 popup_id,
                 &anchor,
                 placement,
@@ -535,7 +536,7 @@ pub(crate) fn number_combo(
                         });
                 },
             );
-        });
+        }
     }
 
     picked.filter(|&v| v != combo.value)
@@ -790,7 +791,8 @@ pub(crate) fn device_picker(
         };
         let mut anchor = response.clone();
         anchor.rect = rect.expand2(Vec2::new(0.0, gap));
-        ui.scope(|ui| {
+        let mut ui = ui.new_child(egui::UiBuilder::new());
+        {
             let style = ui.style_mut();
             style.spacing.menu_margin = egui::Margin::same(6);
             style.visuals.window_fill = theme::MENU;
@@ -803,7 +805,7 @@ pub(crate) fn device_picker(
                 color: Color32::from_black_alpha(100),
             };
             egui::popup::popup_above_or_below_widget(
-                ui,
+                &ui,
                 popup_id,
                 &anchor,
                 placement,
@@ -828,7 +830,7 @@ pub(crate) fn device_picker(
                         .show(ui, add_contents);
                 },
             );
-        });
+        }
     } else if truncated {
         return response.on_hover_ui(|ui| {
             ui.set_max_width(width);

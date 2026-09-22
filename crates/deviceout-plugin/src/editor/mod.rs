@@ -788,6 +788,7 @@ fn update_row(ui: &mut egui::Ui, state: &mut EditorUi, bundle: Option<&PathBuf>)
             egui::Vec2::new(left_w, 30.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
+                ui.set_min_width(left_w);
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let (rect, _) =
                     ui.allocate_exact_size(egui::Vec2::new(10.0, 14.0), egui::Sense::hover());

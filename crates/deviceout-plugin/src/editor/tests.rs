@@ -925,6 +925,123 @@ fn device_menu_wraps_long_names_without_widening_the_window() {
     );
 }
 
+struct BodyHarness {
+    ctx: egui::Context,
+    wiring: Wiring,
+    state: EditorUi,
+    snapshot: Option<UiState>,
+    time: f64,
+}
+
+impl BodyHarness {
+    fn new() -> Self {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let params = Arc::new(DeviceOutParams::default());
+        *params.device_id.write() = "cable".into();
+        let device = |id: &str, name: &str| DeviceInfo {
+            id: id.into(),
+            name: name.into(),
+            is_default: false,
+            mix_format: StreamFormat {
+                sample_rate: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::F32,
+            },
+        };
+
+        Self {
+            ctx,
+            wiring: Wiring {
+                params,
+                engine: Arc::new(EngineController::default()),
+                devices: Arc::new(RwLock::new(vec![
+                    device("cable", "CABLE Input (VB-Audio Virtual Cable)"),
+                    device("realtek", "Realtek Digital Output"),
+                ])),
+            },
+            state: EditorUi::default(),
+            snapshot: Some(running_snapshot()),
+            time: 0.0,
+        }
+    }
+
+    fn frame(&mut self, events: Vec<egui::Event>) -> (egui::Rect, Vec<egui::epaint::TextShape>) {
+        self.time += 0.1;
+        let ctx = self.ctx.clone();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(crate::EDITOR_WIDTH as f32, crate::EDITOR_HEIGHT as f32),
+            )),
+            time: Some(self.time),
+            events,
+            ..Default::default()
+        };
+        let mut rect = egui::Rect::NOTHING;
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(theme::root_frame())
+                .show(ctx, |ui| {
+                    body(
+                        ui,
+                        &mut self.state,
+                        &self.wiring,
+                        None,
+                        self.snapshot.as_ref(),
+                    );
+                    rect = ui.min_rect();
+                });
+        });
+        let mut text = Vec::new();
+        for clipped in output.shapes {
+            collect_text(clipped.shape, &mut text);
+        }
+        (rect, text)
+    }
+
+    fn click(&mut self, pos: egui::Pos2) -> (egui::Rect, Vec<egui::epaint::TextShape>) {
+        self.frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        self.frame(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        self.frame(Vec::new())
+    }
+}
+
+#[test]
+fn opening_the_device_menu_leaves_the_panel_where_it_was() {
+    let mut h = BodyHarness::new();
+    h.frame(Vec::new());
+    let (before, text) = h.frame(Vec::new());
+
+    let trigger = text
+        .iter()
+        .find(|shape| shape.galley.job.text.starts_with("CABLE Input"))
+        .expect("面板上没有设备选择器")
+        .pos;
+    let (after, opened) = h.click(trigger + egui::vec2(5.0, 5.0));
+
+    assert!(
+        opened
+            .iter()
+            .any(|shape| shape.galley.job.text == "Realtek Digital Output"),
+        "设备菜单没有打开"
+    );
+    assert_eq!(before, after, "点开设备菜单后面板被挤动或撑开了");
+}
+
 #[test]
 fn the_window_size_is_not_restored_from_a_saved_project() {
     let params = DeviceOutParams::default();
@@ -936,5 +1053,25 @@ fn the_window_size_is_not_restored_from_a_saved_project() {
     assert!(
         !state.iter().any(|key| key == "editor-state"),
         "窗口尺寸仍在随工程存档，旧工程会把窗口钉死在老版本的高度上：{state:?}"
+    );
+}
+
+#[test]
+fn the_update_button_hugs_the_right_edge_like_every_other_control() {
+    let mut h = BodyHarness::new();
+    h.state.tab = TAB_ABOUT;
+    h.frame(Vec::new());
+    let (panel, text) = h.frame(Vec::new());
+
+    let button = text
+        .iter()
+        .find(|shape| shape.galley.job.text == t().check_updates)
+        .expect("关于页上没有检查更新按钮");
+    let center = button.pos.x + button.galley.size().x / 2.0;
+
+    assert!(
+        center > panel.center().x,
+        "检查更新按钮贴在状态文字后面而不是右边缘：中心 {center}，面板中线 {}",
+        panel.center().x
     );
 }
