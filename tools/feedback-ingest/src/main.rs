@@ -347,6 +347,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    fn admin_post(addr: SocketAddr, action: &str, body: &str, site: Option<&str>) -> String {
+        let site = site
+            .map(|s| format!("Origin: null\r\nSec-Fetch-Site: {s}\r\n"))
+            .unwrap_or_default();
+        talk(
+            addr,
+            &format!(
+                "POST /deviceout-feedback/{ADMIN}/{action} HTTP/1.1\r\nHost: a\r\n{site}Authorization: Basic {}\r\nContent-Length: {}\r\n\r\n{body}",
+                b64("admin:pw"),
+                body.len()
+            ),
+        )
+    }
+
+    #[test]
+    fn a_cross_site_form_cannot_touch_tickets() {
+        let dir = temp("route-origin");
+        let addr = start(&dir, 100);
+        let ticket = post_ticket(addr, "keep");
+        let body = format!("ticket={ticket}&handled=1");
+        for action in ["handle", "delete"] {
+            for site in ["cross-site", "same-site"] {
+                let reply = admin_post(addr, action, &body, Some(site));
+                assert!(reply.starts_with("HTTP/1.1 403 "), "{reply}");
+            }
+        }
+        assert_eq!(dashboard(addr, "")["rows"][0]["handled"], false);
+
+        let reply = admin_post(addr, "handle", &body, Some("same-origin"));
+        assert!(reply.starts_with("HTTP/1.1 303 "), "{reply}");
+        let reply = admin_post(addr, "delete", &body, None);
+        assert!(reply.starts_with("HTTP/1.1 303 "), "{reply}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_ping_without_the_token_is_turned_away() {
         let dir = temp("route-token");

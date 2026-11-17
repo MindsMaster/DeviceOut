@@ -99,6 +99,9 @@ enum Auth {
 }
 
 pub fn handle_admin_handle(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+    if cross_site(req) {
+        return text(403, "origin");
+    }
     if let Some(resp) = admin_gate(req, cfg, state) {
         return resp;
     }
@@ -125,6 +128,12 @@ pub fn handle_admin_handle(req: &Request, cfg: &Config, state: &Mutex<Limits>) -
     }
 }
 
+/// no-referrer 下同源表单的 Origin 也是 null
+fn cross_site(req: &Request) -> bool {
+    req.header("Sec-Fetch-Site")
+        .is_some_and(|site| site != "same-origin")
+}
+
 fn form_field<'a>(body: &'a str, key: &str) -> &'a str {
     body.split('&')
         .find_map(|p| p.strip_prefix(&format!("{key}=")))
@@ -133,6 +142,9 @@ fn form_field<'a>(body: &'a str, key: &str) -> &'a str {
 }
 
 pub fn handle_admin_delete(req: &Request, cfg: &Config, state: &Mutex<Limits>) -> Resp {
+    if cross_site(req) {
+        return text(403, "origin");
+    }
     if let Some(resp) = admin_gate(req, cfg, state) {
         return resp;
     }
