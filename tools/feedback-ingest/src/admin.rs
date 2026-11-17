@@ -295,7 +295,7 @@ fn admin_index(cfg: &Config, index: &Mutex<Index>, prefix: &str, view: View) -> 
     let online = num("online");
     let today = num("today");
     let tickets = num("tickets");
-    let data = data.replace("</", "<\\/");
+    let data = data.replace('<', "\\u003c");
 
     let mut out = String::with_capacity(48 * 1024);
     out.push_str("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">");

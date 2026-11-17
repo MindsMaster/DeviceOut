@@ -330,6 +330,24 @@ mod tests {
     }
 
     #[test]
+    fn a_ticket_cannot_break_the_dashboard_script() {
+        let dir = temp("route-script");
+        let addr = start(&dir, 100);
+        post_ticket(addr, "<!--<script>");
+        let reply = talk(
+            addr,
+            &format!(
+                "GET /deviceout-feedback/{ADMIN}/ HTTP/1.1\r\nHost: a\r\nAuthorization: Basic {}\r\n\r\n",
+                b64("admin:pw")
+            ),
+        );
+        assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
+        assert!(!reply.contains("<!--"), "{reply}");
+        assert!(reply.contains("\\u003c!--\\u003cscript>"), "{reply}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_ping_without_the_token_is_turned_away() {
         let dir = temp("route-token");
         let addr = start(&dir, 100);
