@@ -10,6 +10,7 @@ use deviceout_update::{schedule, Cmp, Feed, PendingManifest, State};
 use crate::{logutil, unix_now};
 
 const FEED_MAX_BYTES: u64 = 64 * 1024;
+const SETUP_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 pub fn run(bundle: &Path, force: bool) -> Result<()> {
     let dll = deviceout_update::bundle_dll(bundle);
@@ -171,8 +172,16 @@ fn download_pending(feed: &Feed, bundle: &Path) -> Result<()> {
         .with_context(|| feed.url.clone())?;
     {
         let mut file = std::fs::File::create(&part).context("create part")?;
-        let mut reader = resp.body_mut().as_reader();
-        std::io::copy(&mut reader, &mut file).context("download setup")?;
+        let mut reader = resp
+            .body_mut()
+            .with_config()
+            .limit(SETUP_MAX_BYTES)
+            .reader();
+        if let Err(e) = std::io::copy(&mut reader, &mut file) {
+            drop(file);
+            let _ = std::fs::remove_file(&part);
+            return Err(e).context("download setup");
+        }
         file.flush()?;
     }
     let actual = deviceout_update::sha256_file(&part)?;
